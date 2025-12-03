@@ -1705,7 +1705,7 @@ const NpcChat = ({ db, userId, npc, onBack, apiKey, isMobile = false, mobileView
         if (mobileView === 'details') {
             return (
                 <div className="flex flex-col h-full overflow-hidden bg-white">
-                    {/* Mobile header with back button */}
+                    {/* Mobile header with back button - no title bar */}
                     <div className="flex items-center justify-between p-4 border-b border-gray-200 bg-white flex-shrink-0">
                         <button
                             onClick={onBack}
@@ -1737,19 +1737,100 @@ const NpcChat = ({ db, userId, npc, onBack, apiKey, isMobile = false, mobileView
         } else if (mobileView === 'conversation') {
             return (
                 <div className="flex flex-col h-full overflow-hidden bg-white">
-                    {/* Mobile header with back button */}
-                    <div className="flex items-center justify-between p-4 border-b border-gray-200 bg-white flex-shrink-0">
-                        <button
-                            onClick={onShowDetails}
-                            className="flex items-center text-indigo-600 hover:text-indigo-800 font-medium"
-                        >
-                            <ChevronLeft className="w-5 h-5 mr-1" />
-                            NPC Details
-                        </button>
-                        <h3 className="text-lg font-semibold text-gray-800">{npc.name}</h3>
+                    {/* Mobile header - Combined navigation and chat info */}
+                    <div className="border-b border-gray-200 bg-white flex-shrink-0">
+                        {/* First row: Back button, message count, reset */}
+                        <div className="flex items-center justify-between px-4 py-2">
+                            <button
+                                onClick={onShowDetails}
+                                className="flex items-center text-indigo-600 hover:text-indigo-800 font-medium"
+                            >
+                                <ChevronLeft className="w-5 h-5 mr-1" />
+                                NPC Details
+                            </button>
+                            <div className="flex items-center space-x-3">
+                                {chatHistory.length > 0 && (
+                                    <>
+                                        <p className="text-sm text-gray-500">{chatHistory.length} messages</p>
+                                        <button
+                                            onClick={handleResetConversation}
+                                            className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-full transition-colors"
+                                            title="Reset Conversation"
+                                        >
+                                            <RotateCcw className="w-4 h-4" />
+                                        </button>
+                                    </>
+                                )}
+                            </div>
+                        </div>
+                        {/* Second row: NPC name centered */}
+                        <div className="px-4 pb-2">
+                            <h3 className="text-lg font-semibold text-gray-800 text-center">{npc.name}</h3>
+                        </div>
                     </div>
                     {/* Chat Panel - Full Height */}
-                    {chatPanel}
+                    <div className="flex-1 overflow-hidden">
+                        {/* Chat History Container - Scrollable */}
+                        <div id="chat-container" className="h-full p-6 space-y-4 overflow-y-auto bg-gray-50">
+                            {chatHistory.length === 0 ? (
+                                <div className="flex items-center justify-center h-full text-center text-gray-400">
+                                    <div>
+                                        <MessageSquare className="w-12 h-12 mx-auto mb-3 text-gray-300" />
+                                        <p>Start the conversation with {npc.name}!</p>
+                                        <p className="mt-2 text-sm">Click the <Volume2 className="w-4 h-4 inline-block" /> icon to hear their voice.</p>
+                                    </div>
+                                </div>
+                            ) : (
+                                chatHistory
+                                    .filter(msg => {
+                                        if (msg.role === 'scene' && msg.isHidden && !showHiddenScenes) {
+                                            return false;
+                                        }
+                                        return true;
+                                    })
+                                    .map((msg, index) => (
+                                        <ChatBubble
+                                            key={index}
+                                            message={msg}
+                                            npcName={npc.name}
+                                            isSpeaking={isSpeaking && index === chatHistory.length - 1 && msg.role === 'npc'}
+                                            onSpeakClick={handleSpeakClick}
+                                        />
+                                    ))
+                            )}
+                            {isThinking && (
+                                <div className="flex justify-start">
+                                    <div className="p-3 text-gray-600 bg-gray-100 rounded-xl rounded-tl-none animate-pulse">
+                                        {npc.name} is thinking...
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                    {/* Input Area - Fixed at Bottom */}
+                    <div className="p-4 border-t border-gray-200 bg-white flex-shrink-0">
+                        <div className="flex items-end space-x-2">
+                            <textarea
+                                ref={messageInputRef}
+                                value={message}
+                                onChange={(e) => setMessage(e.target.value)}
+                                onKeyDown={handleKeyDown}
+                                rows="2"
+                                placeholder={`Say something to ${npc.name}...`}
+                                className="flex-grow p-3 border border-gray-300 rounded-xl focus:ring-indigo-500 focus:border-indigo-500 resize-none"
+                                disabled={isThinking}
+                                maxLength={1000}
+                            />
+                            <Button
+                                onClick={handleSend}
+                                disabled={!message.trim() || isThinking}
+                                loading={isThinking}
+                                className="h-12 w-12 p-0 flex-shrink-0 rounded-xl"
+                            >
+                                {!isThinking && <Send className="w-5 h-5" />}
+                            </Button>
+                        </div>
+                    </div>
                     <ImageModal
                         isOpen={isImageModalOpen}
                         onClose={() => setIsImageModalOpen(false)}
@@ -2005,9 +2086,10 @@ const CompactNpcList = ({ npcs, selectedNpcId, onNpcSelected, onNpcDelete, onCre
                     >
                         <Plus className="w-5 h-5" />
                     </button>
+                    {/* Hide collapse button on mobile */}
                     <button
                         onClick={onToggleCollapse}
-                        className="p-2 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+                        className="hidden md:block p-2 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
                         title="Collapse sidebar"
                     >
                         <ChevronLeft className="w-5 h-5" />
@@ -2219,11 +2301,19 @@ const NPCGeneratorChatbot = ({ user }) => {
         }
         setSelectedNpcId(null);
         setShowCreateForm(true);
+        // On mobile, ensure we show the create form
+        if (isMobile) {
+            setMobileView('list'); // Will show create form via the conditional rendering
+        }
     };
 
     const handleNpcCreated = (newNpcId) => {
         setShowCreateForm(false);
         setSelectedNpcId(newNpcId);
+        // On mobile, navigate to details view
+        if (isMobile) {
+            setMobileView('details');
+        }
     };
 
     const handleNpcDelete = async (npc) => {
@@ -2327,24 +2417,22 @@ const NPCGeneratorChatbot = ({ user }) => {
     if (isMobile) {
         return (
             <div className="flex flex-col h-screen font-sans bg-gray-100">
-                <header className="flex-shrink-0 p-4 bg-white border-b border-gray-200 shadow-sm">
-                    <div className="flex flex-col justify-between md:flex-row md:items-center">
-                        <div>
-                            <h1 className="flex items-center text-2xl font-extrabold text-indigo-800">
-                                <User className="w-7 h-7 mr-2 text-indigo-500" />
-                                GM NPC Assistant
-                            </h1>
-                            <p className="mt-1 text-xs text-gray-600">
-                                Generate, store, and roleplay your campaign's characters.
-                                {db ? (
-                                    <> ID: <span className="font-mono text-indigo-500">{userId?.substring(0, 8) || 'Loading'}...</span></>
-                                ) : (
-                                    <span className="font-bold text-red-500"> DEMO MODE</span>
-                                )}
-                            </p>
+                {/* Only show header on list view */}
+                {(mobileView === 'list' || (!selectedNpc && !showCreateForm)) && (
+                    <header className="flex-shrink-0 p-4 bg-white border-b border-gray-200 shadow-sm">
+                        <div className="flex flex-col justify-between md:flex-row md:items-center">
+                            <div>
+                                <h1 className="flex items-center text-2xl font-extrabold text-indigo-800">
+                                    <User className="w-7 h-7 mr-2 text-indigo-500" />
+                                    GM NPC Assistant
+                                </h1>
+                                <p className="mt-1 text-xs text-gray-600">
+                                    Generate, store, and roleplay your campaign's characters.
+                                </p>
+                            </div>
                         </div>
-                    </div>
-                </header>
+                    </header>
+                )}
 
                 <div className="flex-1 overflow-hidden">
                     {mobileView === 'list' || (!selectedNpc && !showCreateForm) ? (
@@ -2374,11 +2462,6 @@ const NPCGeneratorChatbot = ({ user }) => {
                         </h1>
                         <p className="mt-1 text-xs text-gray-600">
                             Generate, store, and roleplay your campaign's characters.
-                            {db ? (
-                                <> ID: <span className="font-mono text-indigo-500">{userId?.substring(0, 8) || 'Loading'}...</span></>
-                            ) : (
-                                <span className="font-bold text-red-500"> DEMO MODE</span>
-                            )}
                         </p>
                     </div>
 
