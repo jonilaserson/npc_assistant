@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>NPC Assistant Preview</title>
+    <script>
+      // Global variables expected by the component
+      window.__app_id = 'preview-app-id';
+      // Placeholder config - User will need to update this or we can provide a UI to input it
+      window.__firebase_config = JSON.stringify({}); 
+      window.__initial_auth_token = null;
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>
