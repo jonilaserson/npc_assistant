@@ -33,13 +33,7 @@ const magicalStyles = `
 const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
 const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
 const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
-const apiKey = import.meta.env.VITE_GOOGLE_AI_API_KEY; // API key is provided by the canvas environment
-const openai_api_key = import.meta.env.VITE_OPENAI_API_KEY;
 
-// --- Cloudinary Configuration ---
-const CLOUDINARY_CLOUD_NAME = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME;
-const CLOUDINARY_API_KEY = import.meta.env.VITE_CLOUDINARY_API_KEY;
-const CLOUDINARY_API_SECRET = import.meta.env.VITE_CLOUDINARY_API_SECRET;
 
 import { AVAILABLE_VOICES } from './voices';
 
@@ -226,7 +220,7 @@ const generateStructuredNPC = async (description, apiKey) => {
         }
     };
 
-    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
+    const apiUrl = `/.netlify/functions/gemini`;
 
     try {
         const response = await fetchWithBackoff(apiUrl, {
@@ -249,7 +243,7 @@ const generateStructuredNPC = async (description, apiKey) => {
  * Uses a two-step process: first asks an LLM to create the perfect DALL-E prompt,
  * then generates the image with that optimized prompt.
  */
-const generateNPCImage = async (name, raceClass, visualDescription, gender, ageRange, personality, apiKey) => {
+const generateNPCImage = async (name, raceClass, visualDescription, gender, ageRange, personality, npcId) => {
     // Step 1: Ask the LLM to act as a DALL-E artist and create the perfect prompt
     console.log(`\n%c[NPC Generator] Step 1: Asking LLM to create optimized DALL-E prompt...`, 'color: magenta; font-weight: bold;');
 
@@ -282,7 +276,7 @@ Respond with ONLY the prompt text, nothing else.`;
         }
     };
 
-    const geminiApiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
+    const geminiApiUrl = `/.netlify/functions/gemini`;
 
     let optimizedPrompt;
     try {
@@ -296,7 +290,6 @@ Respond with ONLY the prompt text, nothing else.`;
 
         if (!optimizedPrompt) {
             console.warn("Could not generate optimized prompt, falling back to basic prompt");
-            // Fallback to basic prompt if LLM fails
             const description = (visualDescription && visualDescription.trim()) ? visualDescription : personality;
             optimizedPrompt = `Create a portrait of ${name}, a ${gender} ${ageRange} ${raceClass}. ${description || ''} The character should be centered and fill the frame. Style: Dungeons and Dragons fantasy art, dramatic lighting, professional illustration.`;
         }
@@ -310,135 +303,40 @@ Respond with ONLY the prompt text, nothing else.`;
     console.log(optimizedPrompt);
     console.log('----------------------------------------\n');
 
-    // Step 2: Use the optimized prompt with DALL-E 3
-    console.log(`%c[NPC Generator] Step 2: Generating image with DALL-E...`, 'color: green; font-weight: bold;');
+    // Step 2: Use the optimized prompt with DALL-E 3 via Backend Function
+    console.log(`%c[NPC Generator] Step 2: Generating image with DALL-E and uploading...`, 'color: green; font-weight: bold;');
 
-    const apiUrl = 'https://api.openai.com/v1/images/generations';
-
-    const payload = {
-        model: "dall-e-3",
-        prompt: optimizedPrompt,
-        n: 1,
-        size: "1024x1024",
-        quality: "standard",
-        style: "vivid"
-    };
+    const apiUrl = '/.netlify/functions/generate-image';
 
     try {
-        const response = await fetchWithBackoff(apiUrl, {
+        const response = await fetch(apiUrl, {
             method: 'POST',
             headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${openai_api_key}`
+                'Content-Type': 'application/json'
             },
-            body: JSON.stringify(payload)
+            body: JSON.stringify({
+                prompt: optimizedPrompt,
+                npcId: npcId
+            })
         });
 
-        const result = await response.json();
-        console.log(`[${new Date().toISOString()}] DALL-E Response:`, result);
-
-        // DALL-E 3 returns a URL to the generated image
-        const imageUrl = result?.data?.[0]?.url;
-
-        if (!imageUrl) {
-            console.error("API Response:", JSON.stringify(result, null, 2));
-            throw new Error("Could not generate image. Check console for details.");
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.error || "Image generation failed");
         }
 
-        console.log(`[${new Date().toISOString()}] DALL-E Image URL:`, imageUrl);
+        const result = await response.json();
+        console.log(`[${new Date().toISOString()}] Image Generated and Uploaded:`, result);
 
-        // Return the URL directly - it can be used in <img src="..."> tags
-        // Note: This URL is temporary and expires after ~1 hour
-        return imageUrl;
+        // Return the object with secure_url and public_id
+        return result;
     } catch (e) {
         console.error("Error generating image:", e);
         throw new Error(`Failed to generate NPC image: ${e.message}`);
     }
 };
 
-/**
- * Generates a SHA-256 signature for Cloudinary signed uploads.
- * @param {string} paramsToSign - The parameters to sign
- * @returns {Promise<string>} The hex signature
- */
-const generateCloudinarySignature = async (paramsToSign) => {
-    const encoder = new TextEncoder();
-    const data = encoder.encode(paramsToSign);
-    const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-    const hashArray = Array.from(new Uint8Array(hashBuffer));
-    return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-};
 
-/**
- * Uploads an image URL to Cloudinary and returns the permanent Cloudinary URL.
- * Uses signed uploads similar to cloudinary.uploader.upload() pattern.
- * @param {string} imageUrl - The temporary DALL-E image URL
- * @param {string} npcId - The NPC ID to use as the public_id for the image
- * @returns {Promise<string>} The permanent Cloudinary URL
- */
-const uploadToCloudinary = async (imageUrl, npcId) => {
-    try {
-        console.log(`[${new Date().toISOString()}] Uploading image to Cloudinary for NPC: ${npcId}`);
-
-        // Cloudinary upload endpoint
-        const uploadUrl = `https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD_NAME}/image/upload`;
-
-        // Generate timestamp
-        const timestamp = Math.round(Date.now() / 1000);
-
-        // Public ID with folder structure matching user's pattern
-        const publicId = `npcs/images/${npcId}`;
-
-        // Parameters for signature (alphabetically ordered, excluding file and api_key)
-        // Note: 'invalidate' is removed to simplify signature matching
-        const paramsToSign = `overwrite=true&public_id=${publicId}&timestamp=${timestamp}${CLOUDINARY_API_SECRET}`;
-
-        // Generate signature
-        const signature = await generateCloudinarySignature(paramsToSign);
-
-        // Create form data for upload
-        const formData = new FormData();
-        formData.append('file', imageUrl);
-        formData.append('public_id', publicId);
-        formData.append('timestamp', timestamp.toString());
-        formData.append('api_key', CLOUDINARY_API_KEY);
-        formData.append('signature', signature);
-        formData.append('overwrite', 'true');
-        // Removed invalidate to match signature
-
-        const response = await fetch(uploadUrl, {
-            method: 'POST',
-            body: formData
-        });
-
-        if (!response.ok) {
-            const errorData = await response.json();
-            console.error('Cloudinary upload failed:', errorData);
-            throw new Error(`Cloudinary upload failed: ${errorData.error?.message || 'Unknown error'}`);
-        }
-
-        const uploadResponse = await response.json();
-        const cloudinaryUrl = uploadResponse.secure_url;
-        const cloudinaryImageId = uploadResponse.public_id;
-
-        console.log(`[${new Date().toISOString()}] Image uploaded to Cloudinary:`, cloudinaryUrl);
-        console.log(`Public ID: ${cloudinaryImageId}`);
-
-        // Return both URL and public_id like the user's example
-        return {
-            secure_url: cloudinaryUrl,
-            public_id: cloudinaryImageId
-        };
-    } catch (e) {
-        console.error('Error uploading to Cloudinary:', e);
-        // Return original URL if Cloudinary upload fails
-        console.warn('Falling back to original DALL-E URL');
-        return {
-            secure_url: imageUrl,
-            public_id: null
-        };
-    }
-};
 
 /**
  * Sends a message to the NPC and gets a roleplaying response.
@@ -469,7 +367,7 @@ const getNPCResponse = async (structuredData, chatHistory, apiKey) => {
         systemInstruction: { parts: [{ text: systemPrompt }] }
     };
 
-    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
+    const apiUrl = `/.netlify/functions/gemini`;
 
     try {
         const response = await fetchWithBackoff(apiUrl, {
@@ -522,7 +420,7 @@ const regenerateNPCField = async (structuredData, field, apiKey) => {
         systemInstruction: { parts: [{ text: systemPrompt }] }
     };
 
-    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
+    const apiUrl = `/.netlify/functions/gemini`;
 
     try {
         const response = await fetchWithBackoff(apiUrl, {
@@ -627,51 +525,9 @@ const textToSpeech = async (text, structuredData, apiKey) => {
 
 // Path constants
 const NPC_COLLECTION_NAME = 'npcs';
-const npcCollectionPath = (appId, userId) => `artifacts/${appId}/public/data/${NPC_COLLECTION_NAME}`;
+const npcCollectionPath = (appId, userId) => `users/${userId}/${NPC_COLLECTION_NAME}`;
 
-function useFirebase() {
-    const [userId, setUserId] = useState(null);
-    const [isAuthReady, setIsAuthReady] = useState(false);
 
-    useEffect(() => {
-        // Use the imported auth instance
-        const unsubscribe = onAuthStateChanged(auth, async (user) => {
-            if (user) {
-                setUserId(user.uid);
-                setIsAuthReady(true);
-            } else {
-                // Sign in anonymously if no token is available or user is logged out
-                try {
-                    if (initialAuthToken) {
-                        await signInWithCustomToken(auth, initialAuthToken);
-                    } else {
-                        await signInAnonymously(auth);
-                    }
-                } catch (e) {
-                    console.error("Anonymous/Custom Token Sign-in Failed:", e);
-                    // Fallback to a random ID if sign-in completely fails
-                    setUserId(crypto.randomUUID());
-                    setIsAuthReady(true);
-                }
-            }
-        });
-
-        return () => unsubscribe();
-    }, []);
-
-    // Effect to handle the initial token login if not handled by onAuthStateChanged timing
-    useEffect(() => {
-        if (auth && !userId && !isAuthReady && initialAuthToken) {
-            signInWithCustomToken(auth, initialAuthToken).catch(e => {
-                console.error("Token login failed after init:", e);
-                setUserId(crypto.randomUUID());
-                setIsAuthReady(true);
-            });
-        }
-    }, [userId, isAuthReady]);
-
-    return { db, userId, isAuthReady };
-}
 
 function useNPCs(db, userId, isAuthReady) {
     const [npcs, setNpcs] = useState([]);
@@ -1329,13 +1185,11 @@ const NpcChat = ({ db, userId, npc, onBack, apiKey }) => {
         try {
             const data = npc.structuredData;
 
-            // Step 1: Generate image with DALL-E 3
-            const dalleUrl = await generateNPCImage(data.name, data.raceClass, data.visual, data.gender, data.ageRange, data.personality, apiKey);
+            // Step 1: Generate image with DALL-E 3 and upload to Cloudinary (via backend)
+            const { secure_url, public_id } = await generateNPCImage(data.name, data.raceClass, data.visual, data.gender, data.ageRange, data.personality, npc.id);
 
-            // Step 2: Upload to Cloudinary to replace the existing image
-            const uploadResult = await uploadToCloudinary(dalleUrl, npc.id);
-            const cloudinaryUrl = uploadResult.secure_url;
-            const cloudinaryImageId = uploadResult.public_id;
+            const cloudinaryUrl = secure_url;
+            const cloudinaryImageId = public_id;
 
             // Step 3: Update the current display
             setCurrentImageUrl(cloudinaryUrl);
@@ -1906,19 +1760,10 @@ const CompactNpcList = ({ npcs, selectedNpcId, onNpcSelected, onNpcDelete, onCre
         console.log(`[${new Date().toISOString()}] Deleting image from Cloudinary: ${publicId}`);
 
         try {
-            const timestamp = Math.round((new Date()).getTime() / 1000);
-            const paramsToSign = `public_id=${publicId}&timestamp=${timestamp}${CLOUDINARY_API_SECRET}`;
-            const signature = await generateCloudinarySignature(paramsToSign);
-
-            const formData = new FormData();
-            formData.append('public_id', publicId);
-            formData.append('api_key', CLOUDINARY_API_KEY);
-            formData.append('timestamp', timestamp);
-            formData.append('signature', signature);
-
-            const response = await fetch(`https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD_NAME}/image/destroy`, {
+            const response = await fetch('/.netlify/functions/delete-image', {
                 method: 'POST',
-                body: formData
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ publicId })
             });
 
             const data = await response.json();
@@ -2039,19 +1884,10 @@ const NpcList = ({ npcs, onNpcSelected, db, userId, loading }) => {
         console.log(`[${new Date().toISOString()}] Deleting image from Cloudinary: ${publicId}`);
 
         try {
-            const timestamp = Math.round((new Date()).getTime() / 1000);
-            const paramsToSign = `public_id=${publicId}&timestamp=${timestamp}${CLOUDINARY_API_SECRET}`;
-            const signature = await generateCloudinarySignature(paramsToSign);
-
-            const formData = new FormData();
-            formData.append('public_id', publicId);
-            formData.append('api_key', CLOUDINARY_API_KEY);
-            formData.append('timestamp', timestamp);
-            formData.append('signature', signature);
-
-            const response = await fetch(`https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD_NAME}/image/destroy`, {
+            const response = await fetch('/.netlify/functions/delete-image', {
                 method: 'POST',
-                body: formData
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ publicId })
             });
 
             const data = await response.json();
@@ -2147,8 +1983,9 @@ const NpcList = ({ npcs, onNpcSelected, db, userId, loading }) => {
 
 // --- Main Application Component (Unchanged) ---
 
-const App = () => {
-    const { db, userId, isAuthReady } = useFirebase();
+const NPCGeneratorChatbot = ({ user }) => {
+    const userId = user.uid;
+    const isAuthReady = true;
     const { npcs, loading } = useNPCs(db, userId, isAuthReady);
 
     const [selectedNpcId, setSelectedNpcId] = useState(null);
@@ -2326,4 +2163,4 @@ const App = () => {
     );
 };
 
-export default App; 
+export default NPCGeneratorChatbot; 
