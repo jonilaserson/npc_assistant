@@ -3,7 +3,7 @@ import { onAuthStateChanged, signInAnonymously, signInWithCustomToken } from 'fi
 import { collection, deleteDoc, doc, onSnapshot, orderBy, query, setDoc, updateDoc } from 'firebase/firestore';
 import { getDownloadURL, ref, uploadString } from 'firebase/storage';
 import { auth, db, storage } from './firebaseConfig';
-import { Loader2, Zap, Brain, Wand2, MessageSquare, List, Send, Volume2, User, ChevronsDown, ChevronsUp, RefreshCw, Trash2, X, ChevronLeft, ChevronRight, Plus, GripVertical, Check, RotateCcw, Edit2, Eye, EyeOff, Sparkles } from 'lucide-react';
+import { Loader2, Zap, Brain, Wand2, MessageSquare, List, Send, Volume2, User, ChevronsDown, ChevronsUp, RefreshCw, Trash2, X, ChevronLeft, ChevronRight, Plus, GripVertical, Check, RotateCcw, Edit2, Eye, EyeOff, Sparkles, Maximize2 } from 'lucide-react';
 
 const magicalStyles = `
 @keyframes magic-wiggle {
@@ -210,9 +210,9 @@ const generateStructuredNPC = async (description, apiKey) => {
                     gender: { type: "STRING", description: "The NPC's gender, e.g., 'female', 'male', 'other'." },
                     ageRange: { type: "STRING", description: "The NPC's general age range, e.g., 'adult','young adult', 'old', 'middle-aged', 'child'." },
                     personality: { type: "STRING", description: "A concise, detailed summary of the NPC's disposition and mannerisms." },
-                    wants: { type: "STRING", description: "The NPC's primary goal or desire." },
-                    secrets: { type: "STRING", description: "A key secret the NPC hides, critical for plot development." },
-                    pitfalls: { type: "STRING", description: "One thing that may make the NPC lose patience, interest, or demand a clarification in the conversation." },
+                    wants: { type: "STRING", description: "The NPC's primary goal or desire. Write one very short sentence." },
+                    secrets: { type: "STRING", description: "A key secret the NPC hides, critical for plot development. Write one very short sentence." },
+                    pitfalls: { type: "STRING", description: "One thing that may make the NPC lose patience, interest, or demand a clarification in the conversation. Write one very short sentence." },
                     visual: { type: "STRING", description: "A detailed visual description of the NPC's physical appearance, clothing, and equipment." },
                     voiceId: { type: "STRING", description: "The selected voice name (e.g. 'Fenrir') from the available list." }
                 }
@@ -265,6 +265,7 @@ Create a detailed, vivid DALL-E prompt that will generate a portrait that perfec
 5. Be specific about physical appearance, clothing, equipment, and atmosphere
 6. Use the following style: Dungeons and Dragons fantasy art, dramatic lighting, professional illustration
 7. The resulting should be an image without any textual labels or overlays other than a single portrait of the character.
+8. CRITICAL: The generated prompt MUST be less than 700 characters in length.
 Respond with ONLY the prompt text, nothing else.`;
 
     const promptPayload = {
@@ -439,6 +440,56 @@ const regenerateNPCField = async (structuredData, field, apiKey) => {
     }
 };
 
+/**
+ * Expands a specific field of the NPC profile to be more detailed.
+ */
+const expandNPCField = async (structuredData, field, apiKey) => {
+    const fieldDescriptions = {
+        wants: "The NPC's primary goal or desire.",
+        secrets: "A key secret the NPC hides, critical for plot development.",
+        pitfalls: "One thing that may make the NPC lose patience, interest, or demand a clarification in the conversation."
+    };
+
+    const targetDescription = fieldDescriptions[field] || "content for this field";
+
+    const systemPrompt = `You are an expert RPG character creator. Your task is to EXPAND the '${field}' field for the following character.
+    
+    Character Context:
+    - Name: ${structuredData.name}
+    - Race/Class: ${structuredData.raceClass}
+    - Gender/Age: ${structuredData.gender} ${structuredData.ageRange}
+    ${field !== 'personality' ? `- Personality: ${structuredData.personality}` : ''}
+    
+    Current '${field}': "${structuredData[field]}"
+    
+    Task: Expand and/or add one more *short* sentence to the '${field}' entry. Otherwise, only minimal modification are allowed to the existing text.
+    Description of this field: ${targetDescription}
+    
+    Respond with ONLY the resulted text. Do not include labels, quotes, or explanations.`;
+
+    const payload = {
+        contents: [{ parts: [{ text: "Expand this field." }] }],
+        systemInstruction: { parts: [{ text: systemPrompt }] }
+    };
+
+    const apiUrl = `/.netlify/functions/gemini`;
+
+    try {
+        const response = await fetchWithBackoff(apiUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        const result = await response.json();
+        const text = result.candidates?.[0]?.content?.parts?.[0]?.text;
+        if (!text) throw new Error("Model returned no text response.");
+        return text.trim();
+    } catch (e) {
+        console.error(`Error expanding field ${field}:`, e);
+        throw new Error(`Failed to expand ${field}.`);
+    }
+};
+
 
 /**
  * Converts text to a playable audio URL, selecting voice based on structured data.
@@ -569,11 +620,12 @@ function useNPCs(db, userId, isAuthReady) {
 
 // --- Editable Field Component ---
 
-const EditableField = ({ label, value, onSave, onRegenerate, type = 'text', options = [], className = '', hideLabel = false, textClassName = '' }) => {
+const EditableField = ({ label, value, onSave, onRegenerate, onExpand, type = 'text', options = [], className = '', hideLabel = false, textClassName = '' }) => {
     const [isEditing, setIsEditing] = useState(false);
     const [tempValue, setTempValue] = useState(value);
     const [isSaving, setIsSaving] = useState(false);
     const [isRegenerating, setIsRegenerating] = useState(false);
+    const [isExpanding, setIsExpanding] = useState(false);
 
     useEffect(() => {
         setTempValue(value);
@@ -619,6 +671,24 @@ const EditableField = ({ label, value, onSave, onRegenerate, type = 'text', opti
         }
     };
 
+    const handleExpand = async (e) => {
+        e.stopPropagation();
+        if (!onExpand) return;
+
+        setIsExpanding(true);
+        try {
+            const newValue = await onExpand();
+            if (newValue) {
+                setTempValue(newValue);
+                setIsEditing(true);
+            }
+        } catch (error) {
+            console.error("Expansion failed:", error);
+        } finally {
+            setIsExpanding(false);
+        }
+    };
+
     const handleKeyDown = (e) => {
         if (e.key === 'Enter' && (type === 'text' || type === 'select')) {
             handleSave();
@@ -633,26 +703,42 @@ const EditableField = ({ label, value, onSave, onRegenerate, type = 'text', opti
                 <style>{magicalStyles}</style>
                 <div className="flex items-center justify-between mb-1">
                     {!hideLabel && <label className="block text-xs font-bold text-indigo-700">{label}</label>}
-                    {onRegenerate && (
-                        <div className="relative">
+                    <div className="flex items-center space-x-1">
+                        {onExpand && (
                             <button
-                                onClick={handleRegenerate}
-                                disabled={isRegenerating || isSaving}
-                                className={`p-0.5 rounded transition-colors ${isRegenerating ? 'cursor-default' : 'text-purple-600 hover:text-purple-800'}`}
-                                title="Regenerate this field"
+                                onClick={handleExpand}
+                                disabled={isExpanding || isRegenerating || isSaving}
+                                className={`p-0.5 rounded transition-colors ${isExpanding ? 'cursor-default' : 'text-blue-600 hover:text-blue-800'}`}
+                                title="Expand this field"
                             >
-                                {isRegenerating ? (
-                                    <div className="relative">
-                                        <Wand2 className="w-4 h-4 animate-magic" />
-                                        <Sparkles className="w-2 h-2 text-yellow-400 absolute -top-1 -right-1 animate-sparkle-1" />
-                                        <Sparkles className="w-2 h-2 text-cyan-400 absolute -bottom-1 -left-1 animate-sparkle-2" />
-                                    </div>
+                                {isExpanding ? (
+                                    <Loader2 className="w-4 h-4 animate-spin" />
                                 ) : (
-                                    <Wand2 className="w-3 h-3" />
+                                    <Maximize2 className="w-3 h-3" />
                                 )}
                             </button>
-                        </div>
-                    )}
+                        )}
+                        {onRegenerate && (
+                            <div className="relative">
+                                <button
+                                    onClick={handleRegenerate}
+                                    disabled={isRegenerating || isSaving}
+                                    className={`p-0.5 rounded transition-colors ${isRegenerating ? 'cursor-default' : 'text-purple-600 hover:text-purple-800'}`}
+                                    title="Regenerate this field"
+                                >
+                                    {isRegenerating ? (
+                                        <div className="relative">
+                                            <Wand2 className="w-4 h-4 animate-magic" />
+                                            <Sparkles className="w-2 h-2 text-yellow-400 absolute -top-1 -right-1 animate-sparkle-1" />
+                                            <Sparkles className="w-2 h-2 text-cyan-400 absolute -bottom-1 -left-1 animate-sparkle-2" />
+                                        </div>
+                                    ) : (
+                                        <Wand2 className="w-3 h-3" />
+                                    )}
+                                </button>
+                            </div>
+                        )}
+                    </div>
                 </div>
                 <div className="flex items-start space-x-2">
                     {type === 'textarea' ? (
@@ -660,7 +746,7 @@ const EditableField = ({ label, value, onSave, onRegenerate, type = 'text', opti
                             value={tempValue}
                             onChange={(e) => setTempValue(e.target.value)}
                             className="flex-1 p-2 text-sm border border-gray-300 rounded focus:ring-indigo-500 focus:border-indigo-500"
-                            rows={4}
+                            rows={8}
                             autoFocus
                         />
                     ) : type === 'select' ? (
@@ -689,7 +775,7 @@ const EditableField = ({ label, value, onSave, onRegenerate, type = 'text', opti
                     <div className="flex flex-col items-center bg-white shadow-sm border border-gray-200 rounded-full overflow-hidden ml-1">
                         <button
                             onClick={handleSave}
-                            disabled={isSaving || isRegenerating}
+                            disabled={isSaving || isRegenerating || isExpanding}
                             className="p-2 text-green-600 hover:bg-green-50 transition-colors focus:outline-none"
                             title="Save"
                         >
@@ -698,7 +784,7 @@ const EditableField = ({ label, value, onSave, onRegenerate, type = 'text', opti
                         <div className="h-px w-4 bg-gray-200"></div>
                         <button
                             onClick={handleCancel}
-                            disabled={isSaving || isRegenerating}
+                            disabled={isSaving || isRegenerating || isExpanding}
                             className="p-2 text-gray-500 hover:bg-gray-50 transition-colors focus:outline-none"
                             title="Cancel"
                         >
@@ -719,26 +805,44 @@ const EditableField = ({ label, value, onSave, onRegenerate, type = 'text', opti
             <style>{magicalStyles}</style>
             <div className="flex items-center justify-between mb-0.5">
                 {!hideLabel && <p className="text-xs font-bold text-indigo-700">{label}</p>}
-                {onRegenerate && (
-                    <div className="relative">
-                        <button
-                            onClick={handleRegenerate}
-                            disabled={isRegenerating}
-                            className={`p-1 rounded transition-all ${isRegenerating ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 text-purple-600 hover:text-purple-800'}`}
-                            title="Regenerate"
-                        >
-                            {isRegenerating ? (
-                                <div className="relative">
-                                    <Wand2 className="w-4 h-4 animate-magic" />
-                                    <Sparkles className="w-2 h-2 text-yellow-400 absolute -top-1 -right-1 animate-sparkle-1" />
-                                    <Sparkles className="w-2 h-2 text-cyan-400 absolute -bottom-1 -left-1 animate-sparkle-2" />
-                                </div>
-                            ) : (
-                                <Wand2 className="w-3 h-3" />
-                            )}
-                        </button>
-                    </div>
-                )}
+                <div className="flex items-center space-x-1">
+                    {onExpand && (
+                        <div className="relative">
+                            <button
+                                onClick={handleExpand}
+                                disabled={isExpanding}
+                                className={`p-1 rounded transition-all ${isExpanding ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 text-blue-600 hover:text-blue-800'}`}
+                                title="Expand"
+                            >
+                                {isExpanding ? (
+                                    <Loader2 className="w-4 h-4 animate-spin" />
+                                ) : (
+                                    <Maximize2 className="w-3 h-3" />
+                                )}
+                            </button>
+                        </div>
+                    )}
+                    {onRegenerate && (
+                        <div className="relative">
+                            <button
+                                onClick={handleRegenerate}
+                                disabled={isRegenerating}
+                                className={`p-1 rounded transition-all ${isRegenerating ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 text-purple-600 hover:text-purple-800'}`}
+                                title="Regenerate"
+                            >
+                                {isRegenerating ? (
+                                    <div className="relative">
+                                        <Wand2 className="w-4 h-4 animate-magic" />
+                                        <Sparkles className="w-2 h-2 text-yellow-400 absolute -top-1 -right-1 animate-sparkle-1" />
+                                        <Sparkles className="w-2 h-2 text-cyan-400 absolute -bottom-1 -left-1 animate-sparkle-2" />
+                                    </div>
+                                ) : (
+                                    <Wand2 className="w-3 h-3" />
+                                )}
+                            </button>
+                        </div>
+                    )}
+                </div>
             </div>
             <p className={`whitespace-pre-wrap break-words ${textClassName || 'text-sm text-gray-800'}`}>{value || <span className="text-gray-400 italic">Empty</span>}</p>
             {!onRegenerate && <Edit2 className="absolute top-2 right-2 w-3 h-3 text-indigo-400 opacity-0 group-hover:opacity-100 transition-opacity" />}
@@ -817,31 +921,10 @@ const NpcCreation = ({ db, userId, onNpcCreated, apiKey }) => {
             await setDoc(newNpcRef, npcData);
             setStatus(`NPC "${npcName}" created successfully!`);
 
-            // Step 3: Generate initial image with low quality
-            setStatus('Generating initial image...');
-            try {
-                const { secure_url, public_id } = await generateNPCImage(
-                    structuredData.name,
-                    structuredData.raceClass,
-                    structuredData.visual,
-                    structuredData.gender,
-                    structuredData.ageRange,
-                    structuredData.personality,
-                    newNpcRef.id,
-                    true // isInitial = true for low-quality generation
-                );
 
-                // Update the NPC with the generated image
-                await updateDoc(newNpcRef, {
-                    imageUrl: secure_url,
-                    cloudinaryImageId: public_id
-                });
 
-                setStatus(`NPC "${npcName}" created with image!`);
-            } catch (imageError) {
-                console.error('Error generating initial image:', imageError);
-                setStatus(`NPC "${npcName}" created (image generation failed)`);
-            }
+            // Step 3: Skip initial image generation (as per new safeguard)
+            // We leave imageUrl as null so the user sees the "Image not saved" placeholder.
 
             // Clear form and notify parent with the new NPC ID
             setRawDescription('');
@@ -1170,7 +1253,8 @@ const NpcChat = ({ db, userId, npc, onBack, apiKey }) => {
             console.error("Chat Error:", e);
             // Revert optimistic update or show error
             setChatHistory(prev => prev.slice(0, prev.length - 1));
-            // FIX: Replace alert with console error
+            // Restore the message so the user doesn't have to retype it
+            setMessage(text);
             console.error("Failed to get NPC response or save chat. See console for details.");
         } finally {
             setIsThinking(false);
@@ -1281,6 +1365,17 @@ const NpcChat = ({ db, userId, npc, onBack, apiKey }) => {
         }
     };
 
+    const handleExpandField = async (field) => {
+        try {
+            return await expandNPCField(npc.structuredData, field, null);
+        } catch (e) {
+            console.error("Error expanding field:", e);
+            return null;
+        }
+    };
+
+
+
     const handleSetScene = async (isHidden) => {
         if (!sceneDescription.trim()) return;
 
@@ -1373,7 +1468,7 @@ const NpcChat = ({ db, userId, npc, onBack, apiKey }) => {
                 ) : (
                     <Wand2 className="w-5 h-5 mr-2" />
                 )}
-                {isImageGenerating ? 'Conjuring Masterpiece...' : 'Regenerate High-Resolution Portrait'}
+                {isImageGenerating ? 'Conjuring Masterpiece...' : 'Generate Epic Portrait'}
             </button>
 
             {/* GM Details Panel */}
@@ -1439,6 +1534,7 @@ const NpcChat = ({ db, userId, npc, onBack, apiKey }) => {
                             type="textarea"
                             onSave={(val) => handleUpdateField('wants', val)}
                             onRegenerate={() => handleRegenerateField('wants')}
+                            onExpand={() => handleExpandField('wants')}
                         />
                         <EditableField
                             label="Pitfalls"
@@ -1446,6 +1542,7 @@ const NpcChat = ({ db, userId, npc, onBack, apiKey }) => {
                             type="textarea"
                             onSave={(val) => handleUpdateField('pitfalls', val)}
                             onRegenerate={() => handleRegenerateField('pitfalls')}
+                            onExpand={() => handleExpandField('pitfalls')}
                         />
                         <div className="border-l-4 border-red-500 bg-red-50 rounded-r-lg">
                             <EditableField
@@ -1455,6 +1552,7 @@ const NpcChat = ({ db, userId, npc, onBack, apiKey }) => {
                                 className="bg-transparent hover:bg-red-100"
                                 onSave={(val) => handleUpdateField('secrets', val)}
                                 onRegenerate={() => handleRegenerateField('secrets')}
+                                onExpand={() => handleExpandField('secrets')}
                             />
                         </div>
                     </div>
@@ -1482,8 +1580,10 @@ const NpcChat = ({ db, userId, npc, onBack, apiKey }) => {
                         value={sceneDescription}
                         onChange={(e) => setSceneDescription(e.target.value)}
                         placeholder="Describe the setting or scene change..."
+
                         className="w-full p-2 text-sm border border-indigo-200 rounded-lg focus:ring-indigo-500 focus:border-indigo-500 resize-none"
                         rows={3}
+                        maxLength={1000}
                     />
                     <div className="flex items-center justify-between gap-3">
                         <Button
@@ -1585,6 +1685,7 @@ const NpcChat = ({ db, userId, npc, onBack, apiKey }) => {
                         placeholder={`Say something to ${npc.name}...`}
                         className="flex-grow p-3 border border-gray-300 rounded-xl focus:ring-indigo-500 focus:border-indigo-500 resize-none"
                         disabled={isThinking}
+                        maxLength={1000}
                     />
                     <Button
                         onClick={handleSend}
@@ -2024,6 +2125,10 @@ const NPCGeneratorChatbot = ({ user }) => {
     };
 
     const handleCreateNew = () => {
+        if (npcs.length >= 10) {
+            alert("You have reached the limit of 10 NPCs. Please delete an NPC before creating a new one.");
+            return;
+        }
         setSelectedNpcId(null);
         setShowCreateForm(true);
     };
