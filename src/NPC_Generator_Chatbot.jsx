@@ -243,7 +243,7 @@ const generateStructuredNPC = async (description, apiKey) => {
  * Uses a two-step process: first asks an LLM to create the perfect DALL-E prompt,
  * then generates the image with that optimized prompt.
  */
-const generateNPCImage = async (name, raceClass, visualDescription, gender, ageRange, personality, npcId) => {
+const generateNPCImage = async (name, raceClass, visualDescription, gender, ageRange, personality, npcId, isInitial = false) => {
     // Step 1: Ask the LLM to act as a DALL-E artist and create the perfect prompt
     console.log(`\n%c[NPC Generator] Step 1: Asking LLM to create optimized DALL-E prompt...`, 'color: magenta; font-weight: bold;');
 
@@ -303,8 +303,11 @@ Respond with ONLY the prompt text, nothing else.`;
     console.log(optimizedPrompt);
     console.log('----------------------------------------\n');
 
-    // Step 2: Use the optimized prompt with DALL-E 3 via Backend Function
-    console.log(`%c[NPC Generator] Step 2: Generating image with DALL-E and uploading...`, 'color: green; font-weight: bold;');
+    // Step 2: Use the optimized prompt with the appropriate model and quality
+    const model = isInitial ? "gpt-image-1-mini" : "dall-e-3";
+    const quality = isInitial ? "low" : "standard";
+
+    console.log(`%c[NPC Generator] Step 2: Generating ${isInitial ? 'initial' : 'regenerated'} image with ${model} (quality: ${quality})...`, 'color: green; font-weight: bold;');
 
     const apiUrl = '/.netlify/functions/generate-image';
 
@@ -316,7 +319,9 @@ Respond with ONLY the prompt text, nothing else.`;
             },
             body: JSON.stringify({
                 prompt: optimizedPrompt,
-                npcId: npcId
+                npcId: npcId,
+                model: model,
+                quality: quality
             })
         });
 
@@ -797,7 +802,7 @@ const NpcCreation = ({ db, userId, onNpcCreated, apiKey }) => {
             const structuredData = await generateStructuredNPC(rawDescription, apiKey);
             const npcName = structuredData.name || 'Unnamed NPC';
 
-            // Step 2: Save to database (without image)
+            // Step 2: Save to database (without image initially)
             setStatus('Saving NPC...');
             const newNpcRef = doc(collection(db, npcCollectionPath(appId, userId)));
 
@@ -815,6 +820,32 @@ const NpcCreation = ({ db, userId, onNpcCreated, apiKey }) => {
 
             await setDoc(newNpcRef, npcData);
             setStatus(`NPC "${npcName}" created successfully!`);
+
+            // Step 3: Generate initial image with low quality
+            setStatus('Generating initial image...');
+            try {
+                const { secure_url, public_id } = await generateNPCImage(
+                    structuredData.name,
+                    structuredData.raceClass,
+                    structuredData.visual,
+                    structuredData.gender,
+                    structuredData.ageRange,
+                    structuredData.personality,
+                    newNpcRef.id,
+                    true // isInitial = true for low-quality generation
+                );
+
+                // Update the NPC with the generated image
+                await updateDoc(newNpcRef, {
+                    imageUrl: secure_url,
+                    cloudinaryImageId: public_id
+                });
+
+                setStatus(`NPC "${npcName}" created with image!`);
+            } catch (imageError) {
+                console.error('Error generating initial image:', imageError);
+                setStatus(`NPC "${npcName}" created (image generation failed)`);
+            }
 
             // Clear form and notify parent with the new NPC ID
             setRawDescription('');
@@ -1346,7 +1377,7 @@ const NpcChat = ({ db, userId, npc, onBack, apiKey }) => {
                 ) : (
                     <Wand2 className="w-5 h-5 mr-2" />
                 )}
-                {isImageGenerating ? 'Regenerating...' : 'Regenerate Image'}
+                {isImageGenerating ? 'Conjuring Masterpiece...' : 'Regenerate an Epic Portrait'}
             </button>
 
             {/* GM Details Panel */}

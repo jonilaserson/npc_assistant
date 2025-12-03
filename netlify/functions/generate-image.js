@@ -6,7 +6,7 @@ export default async (req, context) => {
     }
 
     try {
-        const { prompt, npcId } = await req.json();
+        const { prompt, npcId, quality = "standard", model = "dall-e-3" } = await req.json();
         const openaiApiKey = process.env.OPENAI_API_KEY;
         const cloudinaryCloudName = process.env.CLOUDINARY_CLOUD_NAME;
         const cloudinaryApiKey = process.env.CLOUDINARY_API_KEY;
@@ -22,22 +22,32 @@ export default async (req, context) => {
             return new Response(JSON.stringify({ error: "Missing Server Configuration" }), { status: 500 });
         }
 
-        // 1. Generate Image with DALL-E 3
-        console.log("Generating image with DALL-E...");
+        // 1. Generate Image with specified model and quality
+        console.log(`Generating image with ${model} (quality: ${quality})...`);
+
+        // Build the payload based on the model
+        const payload = {
+            model: model,
+            prompt: prompt,
+            n: 1,
+            size: "1024x1024"
+        };
+
+        // Add quality parameter (dall-e-3 supports quality, gpt-image-1-mini uses "low" by default)
+        if (model === "dall-e-3") {
+            payload.quality = quality;
+            payload.style = "vivid";
+        } else if (quality === "low") {
+            payload.quality = "low";
+        }
+
         const dalleResponse = await fetch('https://api.openai.com/v1/images/generations', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
                 'Authorization': `Bearer ${openaiApiKey}`
             },
-            body: JSON.stringify({
-                model: "dall-e-3",
-                prompt: prompt,
-                n: 1,
-                size: "1024x1024",
-                quality: "standard",
-                style: "vivid"
-            })
+            body: JSON.stringify(payload)
         });
 
         const dalleResult = await dalleResponse.json();
