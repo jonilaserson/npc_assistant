@@ -1105,7 +1105,7 @@ const ConfirmationModal = ({ isOpen, onClose, onConfirm, title, message }) => {
     );
 };
 
-const NpcChat = ({ db, userId, npc, onBack, apiKey }) => {
+const NpcChat = ({ db, userId, npc, onBack, apiKey, isMobile = false, mobileView = 'details', onShowConversation, onShowDetails }) => {
     const [message, setMessage] = useState('');
     const [chatHistory, setChatHistory] = useState(npc.chats || []);
     const [isThinking, setIsThinking] = useState(false);
@@ -1700,6 +1700,68 @@ const NpcChat = ({ db, userId, npc, onBack, apiKey }) => {
         </div>
     );
 
+    // Mobile rendering: show only one panel at a time
+    if (isMobile) {
+        if (mobileView === 'details') {
+            return (
+                <div className="flex flex-col h-full overflow-hidden bg-white">
+                    {/* Mobile header with back button */}
+                    <div className="flex items-center justify-between p-4 border-b border-gray-200 bg-white flex-shrink-0">
+                        <button
+                            onClick={onBack}
+                            className="flex items-center text-indigo-600 hover:text-indigo-800 font-medium"
+                        >
+                            <ChevronLeft className="w-5 h-5 mr-1" />
+                            Back to List
+                        </button>
+                        <button
+                            onClick={onShowConversation}
+                            className="flex items-center px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 font-medium"
+                        >
+                            <MessageSquare className="w-4 h-4 mr-2" />
+                            Conversation
+                        </button>
+                    </div>
+                    {/* NPC Details Panel - Scrollable */}
+                    <div className="flex-1 overflow-y-auto">
+                        {npcDetailsPanel}
+                    </div>
+                    <ImageModal
+                        isOpen={isImageModalOpen}
+                        onClose={() => setIsImageModalOpen(false)}
+                        imageUrl={currentImageUrl}
+                        altText={npc.name}
+                    />
+                </div>
+            );
+        } else if (mobileView === 'conversation') {
+            return (
+                <div className="flex flex-col h-full overflow-hidden bg-white">
+                    {/* Mobile header with back button */}
+                    <div className="flex items-center justify-between p-4 border-b border-gray-200 bg-white flex-shrink-0">
+                        <button
+                            onClick={onShowDetails}
+                            className="flex items-center text-indigo-600 hover:text-indigo-800 font-medium"
+                        >
+                            <ChevronLeft className="w-5 h-5 mr-1" />
+                            NPC Details
+                        </button>
+                        <h3 className="text-lg font-semibold text-gray-800">{npc.name}</h3>
+                    </div>
+                    {/* Chat Panel - Full Height */}
+                    {chatPanel}
+                    <ImageModal
+                        isOpen={isImageModalOpen}
+                        onClose={() => setIsImageModalOpen(false)}
+                        imageUrl={currentImageUrl}
+                        altText={npc.name}
+                    />
+                </div>
+            );
+        }
+    }
+
+    // Desktop rendering: ResizablePanels
     return (
         <div className="flex h-full overflow-hidden bg-white">
             <ResizablePanels
@@ -2112,7 +2174,29 @@ const NPCGeneratorChatbot = ({ user }) => {
     const [showCreateForm, setShowCreateForm] = useState(false);
     const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
 
+    // Mobile state management
+    const [isMobile, setIsMobile] = useState(false);
+    const [mobileView, setMobileView] = useState('list'); // 'list', 'details', 'conversation'
 
+    // Detect mobile screen size
+    useEffect(() => {
+        const mediaQuery = window.matchMedia('(max-width: 768px)');
+
+        const handleMediaChange = (e) => {
+            setIsMobile(e.matches);
+            // Reset to list view when switching to mobile
+            if (e.matches && mobileView !== 'list' && !selectedNpcId) {
+                setMobileView('list');
+            }
+        };
+
+        // Set initial value
+        setIsMobile(mediaQuery.matches);
+
+        // Listen for changes
+        mediaQuery.addEventListener('change', handleMediaChange);
+        return () => mediaQuery.removeEventListener('change', handleMediaChange);
+    }, []);
 
     // Derive the selected NPC object from the live list
     const selectedNpc = useMemo(() => {
@@ -2122,6 +2206,10 @@ const NPCGeneratorChatbot = ({ user }) => {
     const handleNpcSelected = (npc) => {
         setSelectedNpcId(npc.id);
         setShowCreateForm(false);
+        // On mobile, navigate to details view
+        if (isMobile) {
+            setMobileView('details');
+        }
     };
 
     const handleCreateNew = () => {
@@ -2146,10 +2234,28 @@ const NPCGeneratorChatbot = ({ user }) => {
             // If the deleted NPC was selected, clear selection
             if (selectedNpcId === npc.id) {
                 setSelectedNpcId(null);
+                // On mobile, return to list view
+                if (isMobile) {
+                    setMobileView('list');
+                }
             }
         } catch (error) {
             console.error("Error deleting NPC:", error);
         }
+    };
+
+    // Mobile navigation handlers
+    const handleBackToList = () => {
+        setSelectedNpcId(null);
+        setMobileView('list');
+    };
+
+    const handleShowConversation = () => {
+        setMobileView('conversation');
+    };
+
+    const handleShowDetails = () => {
+        setMobileView('details');
     };
 
     // Right panel content
@@ -2166,7 +2272,11 @@ const NPCGeneratorChatbot = ({ user }) => {
                 db={db}
                 userId={userId}
                 npc={selectedNpc}
-                onBack={() => setSelectedNpcId(null)}
+                onBack={handleBackToList}
+                isMobile={isMobile}
+                mobileView={mobileView}
+                onShowConversation={handleShowConversation}
+                onShowDetails={handleShowDetails}
             />
         );
     } else if (showCreateForm) {
@@ -2213,6 +2323,46 @@ const NPCGeneratorChatbot = ({ user }) => {
         />
     );
 
+    // Mobile rendering: full-screen views
+    if (isMobile) {
+        return (
+            <div className="flex flex-col h-screen font-sans bg-gray-100">
+                <header className="flex-shrink-0 p-4 bg-white border-b border-gray-200 shadow-sm">
+                    <div className="flex flex-col justify-between md:flex-row md:items-center">
+                        <div>
+                            <h1 className="flex items-center text-2xl font-extrabold text-indigo-800">
+                                <User className="w-7 h-7 mr-2 text-indigo-500" />
+                                GM NPC Assistant
+                            </h1>
+                            <p className="mt-1 text-xs text-gray-600">
+                                Generate, store, and roleplay your campaign's characters.
+                                {db ? (
+                                    <> ID: <span className="font-mono text-indigo-500">{userId?.substring(0, 8) || 'Loading'}...</span></>
+                                ) : (
+                                    <span className="font-bold text-red-500"> DEMO MODE</span>
+                                )}
+                            </p>
+                        </div>
+                    </div>
+                </header>
+
+                <div className="flex-1 overflow-hidden">
+                    {mobileView === 'list' || (!selectedNpc && !showCreateForm) ? (
+                        // Show NPC list
+                        leftPanelContent
+                    ) : showCreateForm ? (
+                        // Show create form
+                        rightPanelContent
+                    ) : (
+                        // Show NPC details or conversation
+                        rightPanelContent
+                    )}
+                </div>
+            </div>
+        );
+    }
+
+    // Desktop rendering: ResizablePanels
     return (
         <div className="flex flex-col h-screen font-sans bg-gray-100">
             <header className="flex-shrink-0 p-4 bg-white border-b border-gray-200 shadow-sm">

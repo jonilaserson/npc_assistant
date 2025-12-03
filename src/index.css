@@ -77,3 +77,44 @@
 .animate-slide-in {
     animation: slideInRight 0.2s ease-out forwards;
 }
+
+/* Mobile-specific styles */
+@media (max-width: 768px) {
+
+    /* Larger touch targets for mobile */
+    .npc-list-item {
+        padding: 1rem;
+        min-height: 80px;
+    }
+
+    .npc-list-item img {
+        width: 64px;
+        height: 64px;
+    }
+
+    /* Full-screen mobile views */
+    .mobile-full-screen {
+        width: 100vw;
+        height: 100vh;
+    }
+
+    /* Hide collapse button on mobile */
+    .npc-list-item .group-hover\:opacity-100 {
+        opacity: 1;
+    }
+
+    /* Ensure buttons are touch-friendly */
+    button {
+        min-height: 44px;
+        min-width: 44px;
+    }
+
+    /* Larger text for mobile readability */
+    .npc-list-item h4 {
+        font-size: 1rem;
+    }
+
+    .npc-list-item p {
+        font-size: 0.875rem;
+    }
+}
