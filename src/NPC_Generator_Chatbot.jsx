@@ -1994,7 +1994,7 @@ const NPCGeneratorChatbot = ({ user }) => {
 
     // API Key Management
     const [userApiKey, setUserApiKey] = useState(() => {
-        return apiKey || localStorage.getItem('gemini_api_key') || '';
+        return localStorage.getItem('gemini_api_key') || '';
     });
     const [showApiKeyInput, setShowApiKeyInput] = useState(!userApiKey);
 
