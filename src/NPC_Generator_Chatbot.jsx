@@ -785,10 +785,6 @@ const NpcCreation = ({ db, userId, onNpcCreated, apiKey }) => {
     const [status, setStatus] = useState('');
 
     const handleGenerateNPC = async () => {
-        if (!apiKey) {
-            setStatus("Error: API Key is missing. Please set it in the header.");
-            return;
-        }
         if (!rawDescription.trim()) {
             setStatus("Please enter a description first.");
             return;
@@ -1250,12 +1246,8 @@ const NpcChat = ({ db, userId, npc, onBack, apiKey }) => {
     };
 
     const handleRegenerateField = async (field) => {
-        if (!apiKey) {
-            console.error("API Key missing");
-            return null;
-        }
         try {
-            return await regenerateNPCField(npc.structuredData, field, apiKey);
+            return await regenerateNPCField(npc.structuredData, field, null);
         } catch (e) {
             console.error("Error regenerating field:", e);
             return null;
@@ -1992,17 +1984,7 @@ const NPCGeneratorChatbot = ({ user }) => {
     const [showCreateForm, setShowCreateForm] = useState(false);
     const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
 
-    // API Key Management
-    const [userApiKey, setUserApiKey] = useState(() => {
-        return localStorage.getItem('gemini_api_key') || '';
-    });
-    const [showApiKeyInput, setShowApiKeyInput] = useState(!userApiKey);
 
-    const handleSaveApiKey = (key) => {
-        setUserApiKey(key);
-        localStorage.setItem('gemini_api_key', key);
-        setShowApiKeyInput(false);
-    };
 
     // Derive the selected NPC object from the live list
     const selectedNpc = useMemo(() => {
@@ -2053,7 +2035,6 @@ const NPCGeneratorChatbot = ({ user }) => {
                 userId={userId}
                 npc={selectedNpc}
                 onBack={() => setSelectedNpcId(null)}
-                apiKey={userApiKey}
             />
         );
     } else if (showCreateForm) {
@@ -2063,7 +2044,6 @@ const NPCGeneratorChatbot = ({ user }) => {
                     db={db}
                     userId={userId}
                     onNpcCreated={handleNpcCreated}
-                    apiKey={userApiKey}
                 />
             </div>
         );
@@ -2119,36 +2099,7 @@ const NPCGeneratorChatbot = ({ user }) => {
                             )}
                         </p>
                     </div>
-                    <div className="mt-2 md:mt-0">
-                        {!showApiKeyInput ? (
-                            <button
-                                onClick={() => setShowApiKeyInput(true)}
-                                className="text-xs text-indigo-600 underline hover:text-indigo-800"
-                            >
-                                {userApiKey ? 'Update API Key' : 'Set API Key'}
-                            </button>
-                        ) : (
-                            <div className="flex items-center space-x-2">
-                                <input
-                                    type="password"
-                                    placeholder="Enter Gemini API Key"
-                                    className="px-2 py-1 text-xs border rounded focus:ring-indigo-500 focus:border-indigo-500"
-                                    defaultValue={userApiKey}
-                                    onBlur={(e) => handleSaveApiKey(e.target.value)}
-                                    onKeyDown={(e) => {
-                                        if (e.key === 'Enter') handleSaveApiKey(e.currentTarget.value);
-                                    }}
-                                />
-                                <button
-                                    onClick={() => setShowApiKeyInput(false)}
-                                    className="text-xs text-gray-500 hover:text-gray-700"
-                                >
-                                    Cancel
-                                </button>
-                            </div>
-                        )}
-                        {!userApiKey && <p className="text-xs text-red-500 mt-1">API Key required</p>}
-                    </div>
+
                 </div>
             </header>
 
