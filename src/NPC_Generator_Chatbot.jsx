@@ -1737,36 +1737,26 @@ const NpcChat = ({ db, userId, npc, onBack, apiKey, isMobile = false, mobileView
         } else if (mobileView === 'conversation') {
             return (
                 <div className="flex flex-col h-full overflow-hidden bg-white">
-                    {/* Mobile header - Combined navigation and chat info */}
-                    <div className="border-b border-gray-200 bg-white flex-shrink-0">
-                        {/* First row: Back button, message count, reset */}
-                        <div className="flex items-center justify-between px-4 py-2">
+                    {/* Mobile header - Simplified */}
+                    <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 bg-white flex-shrink-0">
+                        <div className="flex items-center space-x-2">
                             <button
                                 onClick={onShowDetails}
-                                className="flex items-center text-indigo-600 hover:text-indigo-800 font-medium"
+                                className="text-indigo-600 hover:text-indigo-800"
                             >
-                                <ChevronLeft className="w-5 h-5 mr-1" />
-                                NPC Details
+                                <ChevronLeft className="w-6 h-6" />
                             </button>
-                            <div className="flex items-center space-x-3">
-                                {chatHistory.length > 0 && (
-                                    <>
-                                        <p className="text-sm text-gray-500">{chatHistory.length} messages</p>
-                                        <button
-                                            onClick={handleResetConversation}
-                                            className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-full transition-colors"
-                                            title="Reset Conversation"
-                                        >
-                                            <RotateCcw className="w-4 h-4" />
-                                        </button>
-                                    </>
-                                )}
-                            </div>
+                            <h3 className="text-lg font-semibold text-gray-800">{npc.name}</h3>
                         </div>
-                        {/* Second row: NPC name centered */}
-                        <div className="px-4 pb-2">
-                            <h3 className="text-lg font-semibold text-gray-800 text-center">{npc.name}</h3>
-                        </div>
+                        {chatHistory.length > 0 && (
+                            <button
+                                onClick={handleResetConversation}
+                                className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-full transition-colors"
+                                title="Reset Conversation"
+                            >
+                                <RotateCcw className="w-5 h-5" />
+                            </button>
+                        )}
                     </div>
                     {/* Chat Panel - Full Height */}
                     <div className="flex-1 overflow-hidden">
