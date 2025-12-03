@@ -6,7 +6,7 @@ export default async (req, context) => {
     }
 
     try {
-        const { prompt, npcId, quality = "standard", model = "dall-e-3" } = await req.json();
+        const { prompt, npcId, isInitial = false } = await req.json();
         const openaiApiKey = process.env.OPENAI_API_KEY;
         const cloudinaryCloudName = process.env.CLOUDINARY_CLOUD_NAME;
         const cloudinaryApiKey = process.env.CLOUDINARY_API_KEY;
@@ -22,23 +22,28 @@ export default async (req, context) => {
             return new Response(JSON.stringify({ error: "Missing Server Configuration" }), { status: 500 });
         }
 
-        // 1. Generate Image with specified model and quality
-        console.log(`Generating image with ${model} (quality: ${quality})...`);
-
-        // Build the payload based on the model
-        const payload = {
-            model: model,
-            prompt: prompt,
-            n: 1,
-            size: "1024x1024"
-        };
-
-        // Add quality parameter (dall-e-3 supports quality, gpt-image-1-mini uses "low" by default)
-        if (model === "dall-e-3") {
-            payload.quality = quality;
-            payload.style = "vivid";
-        } else if (quality === "low") {
-            payload.quality = "low";
+        // 1. Generate Image with appropriate model and size
+        let payload;
+        if (isInitial) {
+            // Initial generation: DALL-E 2 with 256x256
+            console.log('Generating initial image with DALL-E 2 (256x256)...');
+            payload = {
+                model: "dall-e-2",
+                prompt: prompt,
+                size: "256x256",
+                n: 1
+            };
+        } else {
+            // Regeneration: DALL-E 3 with 1024x1024 high quality
+            console.log('Generating high-quality image with DALL-E 3 (1024x1024)...');
+            payload = {
+                model: "dall-e-3",
+                prompt: prompt,
+                n: 1,
+                size: "1024x1024",
+                quality: "standard",
+                style: "vivid"
+            };
         }
 
         const dalleResponse = await fetch('https://api.openai.com/v1/images/generations', {

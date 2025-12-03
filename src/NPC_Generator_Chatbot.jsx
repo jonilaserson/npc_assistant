@@ -303,11 +303,8 @@ Respond with ONLY the prompt text, nothing else.`;
     console.log(optimizedPrompt);
     console.log('----------------------------------------\n');
 
-    // Step 2: Use the optimized prompt with the appropriate model and quality
-    const model = isInitial ? "gpt-image-1-mini" : "dall-e-3";
-    const quality = isInitial ? "low" : "standard";
-
-    console.log(`%c[NPC Generator] Step 2: Generating ${isInitial ? 'initial' : 'regenerated'} image with ${model} (quality: ${quality})...`, 'color: green; font-weight: bold;');
+    // Step 2: Use the optimized prompt with the appropriate model
+    console.log(`%c[NPC Generator] Step 2: Generating ${isInitial ? 'initial (DALL-E 2, 256x256)' : 'high-quality (DALL-E 3, 1024x1024)'} image...`, 'color: green; font-weight: bold;');
 
     const apiUrl = '/.netlify/functions/generate-image';
 
@@ -320,8 +317,7 @@ Respond with ONLY the prompt text, nothing else.`;
             body: JSON.stringify({
                 prompt: optimizedPrompt,
                 npcId: npcId,
-                model: model,
-                quality: quality
+                isInitial: isInitial
             })
         });
 
@@ -1377,7 +1373,7 @@ const NpcChat = ({ db, userId, npc, onBack, apiKey }) => {
                 ) : (
                     <Wand2 className="w-5 h-5 mr-2" />
                 )}
-                {isImageGenerating ? 'Conjuring Masterpiece...' : 'Regenerate an Epic Portrait'}
+                {isImageGenerating ? 'Conjuring Masterpiece...' : 'Regenerate High-Resolution Portrait'}
             </button>
 
             {/* GM Details Panel */}
