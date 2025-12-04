@@ -35,7 +35,7 @@ const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__f
 const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
 
 
-import { AVAILABLE_VOICES } from './voices';
+import { AVAILABLE_VOICES, getVoiceById } from './voices';
 
 // --- Voice Configuration Mapping ---
 
@@ -175,6 +175,96 @@ const fetchWithBackoff = async (url, options, retries = 5) => {
     }
 };
 
+// --- Shared Voice Selection Guidelines ---
+
+const VOICE_SELECTION_GUIDELINES = `Voice Selection Guidelines:
+Match the voice to the character by considering:
+
+1. GENDER: Choose a voice that matches the character's gender
+
+2. AGE: Match voice maturity to character age
+   - Young/Child → Young, Youthful voices
+   - Young Adult → Adult voices with energetic qualities
+   - Adult/Middle-aged → Adult, Mature voices
+   - Old/Elderly → Mature, Wise, Deep voices
+
+3. PERSONALITY & DEMEANOR: Match voice qualities to character traits
+   - Friendly/Warm/Kind → Friendly, Warm, Engaging, Approachable
+   - Authoritative/Leader/Noble → Authoritative, Confident, Professional, Powerful
+   - Wise/Scholarly/Calm → Thoughtful, Wise, Calm, Intelligent
+   - Energetic/Enthusiastic/Cheerful → Energetic, Bright, Enthusiastic, Upbeat
+   - Mysterious/Cool/Edgy → Deep, Cool, Distinctive, Gravitas
+   - Professional/Formal → Professional, Articulate, Composed
+   - Casual/Relaxed → Casual, Conversational, Relatable
+   - Gruff/Tough/Serious → Deep, Resonant, Serious, Powerful
+
+Examples:
+- Old male wizard (wise, authoritative) → Autonoe or Orus
+- Young energetic female bard → Pulcherrima or Kore
+- Gruff male warrior → Sadachbia or Zubenelgenubi
+- Friendly female shopkeeper → Despina or Aoede
+- Mysterious male rogue → Sadachbia or Charon
+- Noble female leader → Leda or Algenib
+- Enthusiastic young male adventurer → Enceladus or Alnilam`;
+
+
+
+
+/**
+ * Helper to select a voice from a list of candidates, optionally excluding one.
+ * @param {string[]} candidates - List of voice names to choose from.
+ * @param {string} voiceToExclude - (Optional) Voice name to exclude.
+ * @returns {object|null} The selected voice object or null if none found.
+ */
+const selectVoiceFromCandidates = (candidates, voiceToExclude = '') => {
+    if (!candidates || candidates.length === 0) return null;
+
+    console.log("Voice Candidates:", candidates);
+
+    // Filter out excluded voice
+    // We compare just the name part (first word)
+    const validCandidates = candidates.filter(c => {
+        const candidateName = c.trim().split(' ')[0];
+        return candidateName !== voiceToExclude;
+    });
+
+    console.log(`Valid Candidates (excluding '${voiceToExclude}'):`, validCandidates);
+
+    let selectedVoiceName;
+    if (validCandidates.length > 0) {
+        // Randomly select from valid candidates
+        selectedVoiceName = validCandidates[Math.floor(Math.random() * validCandidates.length)];
+    } else {
+        // If all candidates were excluded (unlikely but possible), pick a random one from available that isn't the excluded one
+        console.warn("All candidates matched excluded voice. Picking random fallback.");
+        const otherVoices = AVAILABLE_VOICES.filter(v => !v.startsWith(voiceToExclude + ' '));
+        const randomVoice = otherVoices[Math.floor(Math.random() * otherVoices.length)];
+        // randomVoice is the full string, extract name
+        selectedVoiceName = randomVoice.split(' ')[0];
+    }
+
+    // Clean up the name
+    selectedVoiceName = selectedVoiceName.trim().replace(/['"]/g, '');
+
+    // Find the full voice string from AVAILABLE_VOICES
+    const fullVoice = AVAILABLE_VOICES.find(v => v.startsWith(selectedVoiceName + ' '));
+
+    if (!fullVoice) {
+        // Try to find by exact match if startsWith failed (e.g. if LLM returned full string)
+        const exactMatch = AVAILABLE_VOICES.find(v => v === selectedVoiceName);
+        if (exactMatch) return exactMatch;
+
+        // If still not found, check if the candidate is just the name and try to find it
+        const nameMatch = AVAILABLE_VOICES.find(v => v.split(' ')[0] === selectedVoiceName);
+        if (nameMatch) return nameMatch;
+
+        // If still not found, return null (caller should handle error)
+        return null;
+    }
+
+    return fullVoice;
+};
+
 /**
  * Generates structured NPC data (Personality, Wants, Secrets, Gender, Age) from a text description.
  */
@@ -196,38 +286,10 @@ const generateStructuredNPC = async (description) => {
             Available Voices:
             ${AVAILABLE_VOICES.join("\n")}
 
-            Voice Selection Guidelines:
-            Match the voice to the character by considering:
+            ${VOICE_SELECTION_GUIDELINES}
             
-            1. GENDER: Choose a voice that matches the character's gender
-            
-            2. AGE: Match voice maturity to character age
-               - Young/Child → Young, Youthful voices
-               - Young Adult → Adult voices with energetic qualities
-               - Adult/Middle-aged → Adult, Mature voices
-               - Old/Elderly → Mature, Wise, Deep voices
-            
-            3. PERSONALITY & DEMEANOR: Match voice qualities to character traits
-               - Friendly/Warm/Kind → Friendly, Warm, Engaging, Approachable
-               - Authoritative/Leader/Noble → Authoritative, Confident, Professional, Powerful
-               - Wise/Scholarly/Calm → Thoughtful, Wise, Calm, Intelligent
-               - Energetic/Enthusiastic/Cheerful → Energetic, Bright, Enthusiastic, Upbeat
-               - Mysterious/Cool/Edgy → Deep, Cool, Distinctive, Gravitas
-               - Professional/Formal → Professional, Articulate, Composed
-               - Casual/Relaxed → Casual, Conversational, Relatable
-               - Gruff/Tough/Serious → Deep, Resonant, Serious, Powerful
-            
-            Examples:
-            - Old male wizard (wise, authoritative) → Autonoe or Orus
-            - Young energetic female bard → Pulcherrima or Kore
-            - Gruff male warrior → Sadachbia or Zubenelgenubi
-            - Friendly female shopkeeper → Despina or Aoede
-            - Mysterious male rogue → Sadachbia or Charon
-            - Noble female leader → Leda or Algenib
-            - Enthusiastic young male adventurer → Enceladus or Alnilam
-            
-            IMPORTANT: Select your TOP 3 best matching voices, then randomly choose ONE of those three.
-            This adds variety while ensuring quality matches. Return only the chosen voice name.` }]
+            IMPORTANT: Select your TOP 3 best matching voices.
+            Return them as a list in the 'voiceCandidates' field.` }]
         },
         generationConfig: {
             responseMimeType: "application/json",
@@ -243,7 +305,7 @@ const generateStructuredNPC = async (description) => {
                     secrets: { type: "STRING", description: "A key secret the NPC hides, critical for plot development. Write one very short sentence." },
                     pitfalls: { type: "STRING", description: "One thing that may make the NPC lose patience, interest, or demand a clarification in the conversation. Write one very short sentence." },
                     visual: { type: "STRING", description: "A detailed visual description of the NPC's physical appearance, clothing, and equipment." },
-                    voiceId: { type: "STRING", description: "The selected voice name (e.g. 'Fenrir') from the available list." }
+                    voiceCandidates: { type: "ARRAY", items: { type: "STRING" }, description: "List of the top 3 best matching voice names (e.g. ['Fenrir', 'Roger', 'Sarah'])." }
                 }
             }
         }
@@ -260,7 +322,19 @@ const generateStructuredNPC = async (description) => {
         const result = await response.json();
         const jsonText = result.candidates?.[0]?.content?.parts?.[0]?.text;
         if (!jsonText) throw new Error("Could not parse structured NPC response.");
-        return JSON.parse(jsonText);
+
+        const parsedData = JSON.parse(jsonText);
+
+        // Programmatic Voice Selection using shared helper
+        const candidates = parsedData.voiceCandidates || [];
+        const selectedVoice = selectVoiceFromCandidates(candidates); // No exclusion for initial generation
+
+        parsedData.voiceId = selectedVoice || null;
+
+        // Remove the candidates field from the final object to match expected structure
+        delete parsedData.voiceCandidates;
+
+        return parsedData;
     } catch (e) {
         console.error("Error generating structured NPC:", e);
         throw new Error(`Failed to generate structured profile: ${e.message}`);
@@ -352,8 +426,16 @@ Respond with ONLY the prompt text, nothing else.`;
         });
 
         if (!response.ok) {
-            const error = await response.json();
-            throw new Error(error.error || "Image generation failed");
+            let errorMessage = "Image generation failed";
+            try {
+                const errorData = await response.json();
+                errorMessage = errorData.error || errorMessage;
+            } catch (parseError) {
+                // If response is not JSON (e.g. timeout text), get text
+                const errorText = await response.text();
+                errorMessage = errorText || response.statusText || errorMessage;
+            }
+            throw new Error(errorMessage);
         }
 
         const result = await response.json();
@@ -519,54 +601,55 @@ const expandNPCField = async (structuredData, field) => {
     }
 };
 
-
 /**
- * Converts text to a playable audio URL, selecting voice based on structured data.
- * * @param {string} text - The raw text from the NPC, which includes [descriptors].
- * @param {object} structuredData - NPC profile data for voice selection.
- * @returns {Promise<string>} The Blob URL for the audio.
+ * Regenerates the voice selection for an NPC.
+ * Asks the LLM to select from the top 3 matching voices, excluding the current voice.
  */
-const textToSpeech = async (text, structuredData) => {
-
-    // 1. FIX 2: Strip all content inside square brackets, including brackets and surrounding spaces/newlines.
-    // This is the CRITICAL fix for preventing the voice from reading stage directions.
-    const dialogueOnly = text.replace(/ *\[[\s\S]*?\] */g, '').trim();
-
-    if (!dialogueOnly) {
-        throw new Error("No spoken dialogue found in the message.");
+const regenerateVoice = async (structuredData) => {
+    if (!AVAILABLE_VOICES || AVAILABLE_VOICES.length === 0) {
+        throw new Error("Configuration Error: AVAILABLE_VOICES list is missing or empty.");
     }
 
-    // 2. The TTS prompt is just the cleaned dialogue.
-    const ttsPrompt = dialogueOnly;
+    const currentVoice = structuredData.voiceId?.split(' ')[0] || '';
 
-    // 3. Select the voice dynamically
-    // Use the LLM-selected voice if available, otherwise fallback to the map
-    let selectedVoice = structuredData.voiceId;
+    const systemPrompt = `You are a professional voice casting director for RPG characters. Your task is to select a NEW voice for this character that matches their profile.
 
-    // Clean up voice ID if it contains the description (e.g. "Fenrir (Male...)")
-    if (selectedVoice) {
-        selectedVoice = selectedVoice.split(' ')[0].trim();
-    }
+Character Information:
+- Name: ${structuredData.name}
+- Race/Class: ${structuredData.raceClass}
+- Gender: ${structuredData.gender}
+- Age Range: ${structuredData.ageRange}
+- Personality: ${structuredData.personality}
 
-    // Validate against the list of names
-    const validVoiceNames = AVAILABLE_VOICES.map(v => v.split(' ')[0]);
-    if (!selectedVoice || !validVoiceNames.includes(selectedVoice)) {
-        selectedVoice = selectVoice(structuredData.gender, structuredData.ageRange);
-    }
+Available Voices:
+${AVAILABLE_VOICES.join("\n")}
+
+${VOICE_SELECTION_GUIDELINES}
+
+Voice Selection Process:
+1. Analyze the character's gender, age, and personality traits
+2. Identify the TOP 3 voices that best match this character
+
+CRITICAL: 
+- Return your TOP 3 choices as a list of strings.
+- Just provide the best matches.`;
 
     const payload = {
-        contents: [{
-            parts: [{ text: ttsPrompt }] // Send only the clean dialogue
-        }],
+        contents: [{ parts: [{ text: "Select new voice candidates for this character." }] }],
+        systemInstruction: { parts: [{ text: systemPrompt }] },
         generationConfig: {
-            responseModalities: ["AUDIO"],
-            speechConfig: {
-                voiceConfig: {
-                    prebuiltVoiceConfig: { voiceName: selectedVoice }
+            responseMimeType: "application/json",
+            responseSchema: {
+                type: "OBJECT",
+                properties: {
+                    candidates: {
+                        type: "ARRAY",
+                        items: { type: "STRING" },
+                        description: "List of the top 3 best matching voice names (e.g. ['Fenrir', 'Roger', 'Sarah'])."
+                    }
                 }
             }
-        },
-        model: "gemini-2.5-flash-preview-tts"
+        }
     };
 
     const apiUrl = `/.netlify/functions/gemini`;
@@ -578,23 +661,148 @@ const textToSpeech = async (text, structuredData) => {
             body: JSON.stringify(payload)
         });
         const result = await response.json();
-        const part = result?.candidates?.[0]?.content?.parts?.[0];
-        const audioData = part?.inlineData?.data;
-        const mimeType = part?.inlineData?.mimeType;
+        const jsonText = result.candidates?.[0]?.content?.parts?.[0]?.text;
+        if (!jsonText) throw new Error("Model returned no voice selection.");
 
-        if (audioData && mimeType && mimeType.startsWith("audio/")) {
-            // Get the sample rate from the mimeType (e.g., audio/L16;rate=24000)
-            const rateMatch = mimeType.match(/rate=(\d+)/);
-            const sampleRate = rateMatch ? parseInt(rateMatch[1], 10) : 24000;
+        const parsedData = JSON.parse(jsonText);
+        const candidates = parsedData.candidates || [];
 
-            // Use the globally defined (and fixed) WAV conversion functions
-            const pcmData = base64ToArrayBuffer(audioData);
-            const pcm16 = new Int16Array(pcmData);
-            const wavBlob = pcmToWav(pcm16, sampleRate);
+        // Use shared helper to select voice, excluding the current one
+        const selectedVoice = selectVoiceFromCandidates(candidates, currentVoice);
 
-            return URL.createObjectURL(wavBlob);
+        if (!selectedVoice) {
+            throw new Error(`Failed to select a valid voice from candidates.`);
+        }
+
+        return selectedVoice;
+    } catch (e) {
+        console.error("Error regenerating voice:", e);
+        throw new Error("Failed to regenerate voice.");
+    }
+};
+
+
+
+
+/**
+ * Gemini TTS implementation
+ */
+const geminiTTS = async (text, voiceName) => {
+    const payload = {
+        contents: [{
+            parts: [{ text }]
+        }],
+        generationConfig: {
+            responseModalities: ["AUDIO"],
+            speechConfig: {
+                voiceConfig: {
+                    prebuiltVoiceConfig: { voiceName }
+                }
+            }
+        },
+        model: "gemini-2.5-flash-preview-tts"
+    };
+
+    const apiUrl = `/.netlify/functions/gemini`;
+
+    const response = await fetchWithBackoff(apiUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+    });
+    const result = await response.json();
+    const part = result?.candidates?.[0]?.content?.parts?.[0];
+    const audioData = part?.inlineData?.data;
+    const mimeType = part?.inlineData?.mimeType;
+
+    if (audioData && mimeType && mimeType.startsWith("audio/")) {
+        // Get the sample rate from the mimeType (e.g., audio/L16;rate=24000)
+        const rateMatch = mimeType.match(/rate=(\d+)/);
+        const sampleRate = rateMatch ? parseInt(rateMatch[1], 10) : 24000;
+
+        // Convert PCM to WAV
+        const pcmData = base64ToArrayBuffer(audioData);
+        const pcm16 = new Int16Array(pcmData);
+        const wavBlob = pcmToWav(pcm16, sampleRate);
+
+        return URL.createObjectURL(wavBlob);
+    } else {
+        throw new Error("Invalid audio response structure or MIME type.");
+    }
+};
+
+/**
+ * ElevenLabs TTS implementation
+ */
+const elevenlabsTTS = async (text, voiceId) => {
+    const apiUrl = `/.netlify/functions/elevenlabs-tts`;
+
+    const response = await fetchWithBackoff(apiUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text, voiceId })
+    });
+    const result = await response.json();
+
+    if (result.audio && result.mimeType) {
+        // Convert base64 to blob
+        const audioData = base64ToArrayBuffer(result.audio);
+        const audioBlob = new Blob([audioData], { type: result.mimeType });
+        return URL.createObjectURL(audioBlob);
+    } else {
+        throw new Error("Invalid audio response from ElevenLabs.");
+    }
+};
+
+/**
+ * Converts text to a playable audio URL, selecting voice based on structured data.
+ * Routes to either Gemini or ElevenLabs based on the voice provider.
+ * @param {string} text - The raw text from the NPC, which includes [descriptors].
+ * @param {object} structuredData - NPC profile data for voice selection.
+ * @returns {Promise<string>} The Blob URL for the audio.
+ */
+const textToSpeech = async (text, structuredData) => {
+
+    // 1. Strip all content inside square brackets, including brackets and surrounding spaces/newlines.
+    // This is the CRITICAL fix for preventing the voice from reading stage directions.
+    const dialogueOnly = text.replace(/ *\[[\s\S]*?\] */g, '').trim();
+
+    if (!dialogueOnly) {
+        throw new Error("No spoken dialogue found in the message.");
+    }
+
+    // 2. Select the voice dynamically
+    // Use the LLM-selected voice if available, otherwise fallback to the map
+    let selectedVoice = structuredData.voiceId;
+
+    // Clean up voice ID if it contains the description (e.g. "Fenrir (Male...)")
+    if (selectedVoice) {
+        selectedVoice = selectedVoice.split(' ')[0].trim();
+    }
+
+    // Get voice data to determine provider
+    let voiceData = getVoiceById(selectedVoice);
+
+    // Validate and fallback if needed
+    if (!voiceData) {
+        // Fallback to voice map
+        const fallbackName = selectVoice(structuredData.gender, structuredData.ageRange);
+        voiceData = getVoiceById(fallbackName);
+
+        if (!voiceData) {
+            // Ultimate fallback to first Gemini voice
+            voiceData = getVoiceById('Aoede');
+        }
+    }
+
+    try {
+        // Route to appropriate TTS provider
+        if (voiceData.provider === 'gemini') {
+            return await geminiTTS(dialogueOnly, voiceData.id);
+        } else if (voiceData.provider === 'elevenlabs') {
+            return await elevenlabsTTS(dialogueOnly, voiceData.id);
         } else {
-            throw new Error("Invalid audio response structure or MIME type.");
+            throw new Error(`Unknown voice provider: ${voiceData.provider}`);
         }
     } catch (e) {
         console.error("Error generating TTS:", e);
@@ -717,7 +925,23 @@ const EditableField = ({ label, value, displayValue, onSave, onRegenerate, onExp
             const newValue = await onRegenerate();
             if (newValue) {
                 setTempValue(newValue);
-                setIsEditing(true); // Switch to edit mode to review
+
+                // For select fields, auto-save the new value
+                // For textarea/text fields, enter edit mode to review
+                if (type === 'select') {
+                    // Auto-save for select fields
+                    try {
+                        await onSave(newValue);
+                        // Don't enter edit mode, just update the value
+                    } catch (error) {
+                        console.error("Failed to save regenerated value:", error);
+                        // On error, enter edit mode to let user try again
+                        setIsEditing(true);
+                    }
+                } else {
+                    // For other field types, enter edit mode to review
+                    setIsEditing(true);
+                }
             }
         } catch (error) {
             console.error("Regeneration failed:", error);
@@ -1462,8 +1686,15 @@ const NpcChat = ({ db, userId, npc, onBack, isMobile = false, mobileView = 'deta
 
             // Handle 'name' field separately as it's at the top level
             if (field === 'name') {
+                // Update both top-level name AND structuredData.name to keep them in sync
+                const updatedStructuredData = {
+                    ...npc.structuredData,
+                    name: value
+                };
+
                 await updateDoc(npcRef, {
                     name: value,
+                    structuredData: updatedStructuredData,
                     updatedAt: new Date().toISOString()
                 });
             } else {
@@ -1499,6 +1730,15 @@ const NpcChat = ({ db, userId, npc, onBack, isMobile = false, mobileView = 'deta
             return await expandNPCField(npc.structuredData, field);
         } catch (e) {
             console.error("Error expanding field:", e);
+            return null;
+        }
+    };
+
+    const handleRegenerateVoice = async () => {
+        try {
+            return await regenerateVoice(npc.structuredData);
+        } catch (e) {
+            console.error("Error regenerating voice:", e);
             return null;
         }
     };
@@ -1627,6 +1867,7 @@ const NpcChat = ({ db, userId, npc, onBack, isMobile = false, mobileView = 'deta
                         type="select"
                         options={AVAILABLE_VOICES}
                         onSave={(val) => handleUpdateField('voiceId', val)}
+                        onRegenerate={handleRegenerateVoice}
                     />
                     <EditableField
                         label="Race/Class"
