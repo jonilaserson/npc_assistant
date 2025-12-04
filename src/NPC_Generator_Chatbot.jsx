@@ -3,7 +3,7 @@ import { onAuthStateChanged, signInAnonymously, signInWithCustomToken } from 'fi
 import { collection, deleteDoc, doc, onSnapshot, orderBy, query, setDoc, updateDoc } from 'firebase/firestore';
 import { getDownloadURL, ref, uploadString } from 'firebase/storage';
 import { auth, db, storage } from './firebaseConfig';
-import { Loader2, Zap, Brain, Wand2, MessageSquare, List, Send, Volume2, User, ChevronsDown, ChevronsUp, RefreshCw, Trash2, X, ChevronLeft, ChevronRight, Plus, GripVertical, Check, RotateCcw, Edit2, Eye, EyeOff, Sparkles, Maximize2 } from 'lucide-react';
+import { Loader2, Zap, Brain, Wand2, MessageSquare, List, Send, Volume2, VolumeX, User, ChevronsDown, ChevronsUp, RefreshCw, Trash2, X, ChevronLeft, ChevronRight, Plus, GripVertical, Check, RotateCcw, Edit2, Eye, EyeOff, Sparkles, Maximize2 } from 'lucide-react';
 
 const magicalStyles = `
 @keyframes magic-wiggle {
@@ -191,14 +191,43 @@ const generateStructuredNPC = async (description, apiKey) => {
             parts: [{
                 text: `You are a professional RPG game assistant. Your task is to analyze the provided text and output a complete JSON object based on the schema.
 
-            CRITICAL: You must select the most appropriate voice for this character from the following list of available voices. Choose based on the gender, age, and personality described in the text.
+            CRITICAL: You must select the most appropriate voice for this character from the following list of available voices.
 
             Available Voices:
             ${AVAILABLE_VOICES.join("\n")}
 
-            Instructions:
-            - Select the 'voiceId' that best matches the character (e.g., 'Gacrux' for an old male wizard, 'Pulcherrima' for a young energetic female).
-            - Ensure the gender of the voice matches the character's gender.` }]
+            Voice Selection Guidelines:
+            Match the voice to the character by considering:
+            
+            1. GENDER: Choose a voice that matches the character's gender
+            
+            2. AGE: Match voice maturity to character age
+               - Young/Child → Young, Youthful voices
+               - Young Adult → Adult voices with energetic qualities
+               - Adult/Middle-aged → Adult, Mature voices
+               - Old/Elderly → Mature, Wise, Deep voices
+            
+            3. PERSONALITY & DEMEANOR: Match voice qualities to character traits
+               - Friendly/Warm/Kind → Friendly, Warm, Engaging, Approachable
+               - Authoritative/Leader/Noble → Authoritative, Confident, Professional, Powerful
+               - Wise/Scholarly/Calm → Thoughtful, Wise, Calm, Intelligent
+               - Energetic/Enthusiastic/Cheerful → Energetic, Bright, Enthusiastic, Upbeat
+               - Mysterious/Cool/Edgy → Deep, Cool, Distinctive, Gravitas
+               - Professional/Formal → Professional, Articulate, Composed
+               - Casual/Relaxed → Casual, Conversational, Relatable
+               - Gruff/Tough/Serious → Deep, Resonant, Serious, Powerful
+            
+            Examples:
+            - Old male wizard (wise, authoritative) → Autonoe or Orus
+            - Young energetic female bard → Pulcherrima or Kore
+            - Gruff male warrior → Sadachbia or Zubenelgenubi
+            - Friendly female shopkeeper → Despina or Aoede
+            - Mysterious male rogue → Sadachbia or Charon
+            - Noble female leader → Leda or Algenib
+            - Enthusiastic young male adventurer → Enceladus or Alnilam
+            
+            IMPORTANT: Select your TOP 3 best matching voices, then randomly choose ONE of those three.
+            This adds variety while ensuring quality matches. Return only the chosen voice name.` }]
         },
         generationConfig: {
             responseMimeType: "application/json",
@@ -620,16 +649,42 @@ function useNPCs(db, userId, isAuthReady) {
 
 // --- Editable Field Component ---
 
-const EditableField = ({ label, value, onSave, onRegenerate, onExpand, type = 'text', options = [], className = '', hideLabel = false, textClassName = '' }) => {
+const EditableField = ({ label, value, displayValue, onSave, onRegenerate, onExpand, type = 'text', options = [], className = '', hideLabel = false, textClassName = '' }) => {
     const [isEditing, setIsEditing] = useState(false);
     const [tempValue, setTempValue] = useState(value);
     const [isSaving, setIsSaving] = useState(false);
     const [isRegenerating, setIsRegenerating] = useState(false);
     const [isExpanding, setIsExpanding] = useState(false);
+    const selectRef = useRef(null);
 
     useEffect(() => {
         setTempValue(value);
     }, [value]);
+
+    // Auto-open select dropdown when entering edit mode
+    useEffect(() => {
+        if (isEditing && type === 'select' && selectRef.current) {
+            // Small delay to ensure the select is rendered and focused
+            setTimeout(() => {
+                if (selectRef.current) {
+                    selectRef.current.focus();
+                    // Use showPicker() if available (modern browsers), otherwise try click
+                    if (typeof selectRef.current.showPicker === 'function') {
+                        try {
+                            selectRef.current.showPicker();
+                        } catch (e) {
+                            // showPicker can throw in some contexts, fallback to click
+                            selectRef.current.click();
+                        }
+                    } else {
+                        // Fallback for older browsers
+                        const event = new MouseEvent('mousedown', { bubbles: true });
+                        selectRef.current.dispatchEvent(event);
+                    }
+                }
+            }, 50);
+        }
+    }, [isEditing, type]);
 
     const handleSave = async () => {
         if (tempValue === value) {
@@ -740,21 +795,57 @@ const EditableField = ({ label, value, onSave, onRegenerate, onExpand, type = 't
                         )}
                     </div>
                 </div>
-                <div className="flex items-start space-x-2">
+                <div className="flex items-start space-x-2 max-w-full overflow-hidden">
                     {type === 'textarea' ? (
                         <textarea
                             value={tempValue}
                             onChange={(e) => setTempValue(e.target.value)}
+                            onKeyDown={(e) => {
+                                if (e.key === 'Escape') {
+                                    handleCancel();
+                                }
+                            }}
                             className="flex-1 p-2 text-sm border border-gray-300 rounded focus:ring-indigo-500 focus:border-indigo-500"
                             rows={8}
                             autoFocus
                         />
                     ) : type === 'select' ? (
                         <select
+                            ref={selectRef}
                             value={tempValue}
-                            onChange={(e) => setTempValue(e.target.value)}
-                            className="flex-1 p-2 text-sm border border-gray-300 rounded focus:ring-indigo-500 focus:border-indigo-500"
+                            onChange={async (e) => {
+                                const newValue = e.target.value;
+                                setTempValue(newValue);
+                                // Auto-save for select fields - no confirmation needed
+                                if (newValue !== value) {
+                                    setIsSaving(true);
+                                    try {
+                                        await onSave(newValue);
+                                        setIsEditing(false);
+                                    } catch (error) {
+                                        console.error("Failed to save:", error);
+                                    } finally {
+                                        setIsSaving(false);
+                                    }
+                                } else {
+                                    // Same value selected - just close edit mode
+                                    setIsEditing(false);
+                                }
+                            }}
+                            onKeyDown={(e) => {
+                                if (e.key === 'Escape') {
+                                    handleCancel();
+                                }
+                            }}
+                            onBlur={() => {
+                                // If user clicks away without changing, just close
+                                if (tempValue === value) {
+                                    setIsEditing(false);
+                                }
+                            }}
+                            className="flex-1 p-2 text-sm border border-gray-300 rounded focus:ring-indigo-500 focus:border-indigo-500 max-w-full overflow-hidden text-ellipsis"
                             autoFocus
+                            disabled={isSaving}
                         >
                             {options.map(opt => (
                                 <option key={opt} value={opt}>{opt}</option>
@@ -765,32 +856,42 @@ const EditableField = ({ label, value, onSave, onRegenerate, onExpand, type = 't
                             type="text"
                             value={tempValue}
                             onChange={(e) => setTempValue(e.target.value)}
-                            onKeyDown={handleKeyDown}
-                            className={`flex-1 p-2 border border-gray-300 rounded focus:ring-indigo-500 focus:border-indigo-500 ${textClassName || 'text-sm'}`}
+                            onKeyDown={(e) => {
+                                if (e.key === 'Enter') {
+                                    handleSave();
+                                } else if (e.key === 'Escape') {
+                                    handleCancel();
+                                }
+                            }}
+                            onBlur={handleSave}
+                            className={`flex-1 p-2 border border-gray-300 rounded focus:ring-indigo-500 focus:border-indigo-500 break-words ${textClassName || 'text-sm'}`}
                             autoFocus
+                            disabled={isSaving}
                         />
                     )}
 
-                    {/* Vertical Pill Action Buttons */}
-                    <div className="flex flex-col items-center bg-white shadow-sm border border-gray-200 rounded-full overflow-hidden ml-1">
-                        <button
-                            onClick={handleSave}
-                            disabled={isSaving || isRegenerating || isExpanding}
-                            className="p-2 text-green-600 hover:bg-green-50 transition-colors focus:outline-none"
-                            title="Save"
-                        >
-                            {isSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
-                        </button>
-                        <div className="h-px w-4 bg-gray-200"></div>
-                        <button
-                            onClick={handleCancel}
-                            disabled={isSaving || isRegenerating || isExpanding}
-                            className="p-2 text-gray-500 hover:bg-gray-50 transition-colors focus:outline-none"
-                            title="Cancel"
-                        >
-                            <X className="w-4 h-4" />
-                        </button>
-                    </div>
+                    {/* Vertical Pill Action Buttons - Only show for textarea */}
+                    {type === 'textarea' && (
+                        <div className="flex flex-col items-center bg-white shadow-sm border border-gray-200 rounded-full overflow-hidden ml-1">
+                            <button
+                                onClick={handleSave}
+                                disabled={isSaving || isRegenerating || isExpanding}
+                                className="p-2 text-green-600 hover:bg-green-50 transition-colors focus:outline-none"
+                                title="Save"
+                            >
+                                {isSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+                            </button>
+                            <div className="h-px w-4 bg-gray-200"></div>
+                            <button
+                                onClick={handleCancel}
+                                disabled={isSaving || isRegenerating || isExpanding}
+                                className="p-2 text-gray-500 hover:bg-gray-50 transition-colors focus:outline-none"
+                                title="Cancel"
+                            >
+                                <X className="w-4 h-4" />
+                            </button>
+                        </div>
+                    )}
                 </div>
             </div>
         );
@@ -844,7 +945,7 @@ const EditableField = ({ label, value, onSave, onRegenerate, onExpand, type = 't
                     )}
                 </div>
             </div>
-            <p className={`whitespace-pre-wrap break-words ${textClassName || 'text-sm text-gray-800'}`}>{value || <span className="text-gray-400 italic">Empty</span>}</p>
+            <p className={`whitespace-pre-wrap break-words ${textClassName || 'text-sm text-gray-800'}`}>{displayValue || value || <span className="text-gray-400 italic">Empty</span>}</p>
             {!onRegenerate && <Edit2 className="absolute top-2 right-2 w-3 h-3 text-indigo-400 opacity-0 group-hover:opacity-100 transition-opacity" />}
         </div>
     );
@@ -1109,7 +1210,9 @@ const NpcChat = ({ db, userId, npc, onBack, apiKey, isMobile = false, mobileView
     const [message, setMessage] = useState('');
     const [chatHistory, setChatHistory] = useState(npc.chats || []);
     const [isThinking, setIsThinking] = useState(false);
-    const [isSpeaking, setIsSpeaking] = useState(false);
+    const [playingMessageIndex, setPlayingMessageIndex] = useState(null); // Track which message is playing
+    const [isAutoPlayEnabled, setIsAutoPlayEnabled] = useState(false); // Auto-play toggle
+    const [audioCache, setAudioCache] = useState({}); // Cache for audio Blob URLs
     const [audioPlayer, setAudioPlayer] = useState(null);
     const [showNpcDetails, setShowNpcDetails] = useState(true);
     const [currentImageUrl, setCurrentImageUrl] = useState(null);
@@ -1137,6 +1240,12 @@ const NpcChat = ({ db, userId, npc, onBack, apiKey, isMobile = false, mobileView
             return () => {
                 player.pause();
                 player.currentTime = 0;
+                // Clean up all cached audio Blob URLs
+                Object.values(audioCache).forEach(url => {
+                    if (url.startsWith('blob:')) {
+                        URL.revokeObjectURL(url);
+                    }
+                });
                 if (player.src && player.src.startsWith('blob:')) {
                     URL.revokeObjectURL(player.src);
                 }
@@ -1157,14 +1266,14 @@ const NpcChat = ({ db, userId, npc, onBack, apiKey, isMobile = false, mobileView
     }, [chatHistory, isThinking]);
 
     /**
-     * FIX 1: The stopAudio function now reliably resets the isSpeaking state.
+     * FIX 1: The stopAudio function now reliably resets the playing state.
      */
     const stopAudio = useCallback(() => {
         if (audioPlayer) {
             audioPlayer.pause();
             audioPlayer.currentTime = 0;
             // FIX: Ensure state resets immediately for a responsive stop button
-            setIsSpeaking(false);
+            setPlayingMessageIndex(null);
         }
     }, [audioPlayer]);
 
@@ -1175,9 +1284,9 @@ const NpcChat = ({ db, userId, npc, onBack, apiKey, isMobile = false, mobileView
         };
     }, [stopAudio]);
 
-    const handleSpeakClick = async (text) => {
-        // If speaking, clicking the button should stop it immediately.
-        if (isSpeaking) {
+    const handleSpeakClick = async (text, index) => {
+        // If speaking THIS message, clicking the button should stop it immediately.
+        if (playingMessageIndex === index) {
             stopAudio();
             return;
         }
@@ -1185,12 +1294,27 @@ const NpcChat = ({ db, userId, npc, onBack, apiKey, isMobile = false, mobileView
         if (!audioPlayer) return;
 
         stopAudio(); // Ensure any existing audio stops
-        setIsSpeaking(true);
+        setPlayingMessageIndex(index);
         audioPlayer.src = '';
 
         try {
-            // Generate TTS using the NPC's structured data for voice selection
-            const audioUrl = await textToSpeech(text, npc.structuredData, apiKey);
+            let audioUrl;
+
+            // Check if we have this audio cached
+            if (audioCache[text]) {
+                console.log('Using cached audio for message');
+                audioUrl = audioCache[text];
+            } else {
+                // Generate TTS using the NPC's structured data for voice selection
+                console.log('Generating new audio via API');
+                audioUrl = await textToSpeech(text, npc.structuredData, apiKey);
+
+                // Cache the audio URL for future use
+                setAudioCache(prev => ({
+                    ...prev,
+                    [text]: audioUrl
+                }));
+            }
 
             // Clean up old blob URL if present
             if (audioPlayer.src.startsWith('blob:')) {
@@ -1203,18 +1327,18 @@ const NpcChat = ({ db, userId, npc, onBack, apiKey, isMobile = false, mobileView
             await audioPlayer.play();
 
             audioPlayer.onended = () => {
-                setIsSpeaking(false);
-                URL.revokeObjectURL(audioUrl); // Clean up after playing
+                setPlayingMessageIndex(null);
+                // Don't revoke cached URLs - keep them for replay
             };
             audioPlayer.onerror = (e) => {
                 console.error("Audio playback failed during play:", e);
                 // FIX: Replace alert with console error and state reset
-                setIsSpeaking(false);
+                setPlayingMessageIndex(null);
             };
         } catch (e) {
             console.error("TTS Click Error:", e);
             // FIX: Replace alert with console error and state reset
-            setIsSpeaking(false);
+            setPlayingMessageIndex(null);
         }
     };
 
@@ -1246,8 +1370,13 @@ const NpcChat = ({ db, userId, npc, onBack, apiKey, isMobile = false, mobileView
                 updatedAt: new Date().toISOString()
             });
 
-            // 4. Update the local state to show the NPC's response
             setChatHistory(finalHistory);
+
+            // 4. Auto-play if enabled
+            if (isAutoPlayEnabled) {
+                // The new message is at the end of finalHistory
+                handleSpeakClick(npcResponseText, finalHistory.length - 1);
+            }
 
         } catch (e) {
             console.error("Chat Error:", e);
@@ -1494,8 +1623,9 @@ const NpcChat = ({ db, userId, npc, onBack, apiKey, isMobile = false, mobileView
                     <EditableField
                         label="Voice"
                         value={npc.structuredData.voiceId || selectVoice(npc.structuredData.gender, npc.structuredData.ageRange)}
+                        displayValue={(npc.structuredData.voiceId || selectVoice(npc.structuredData.gender, npc.structuredData.ageRange)).split(' ')[0]}
                         type="select"
-                        options={AVAILABLE_VOICES.map(v => v.split(' ')[0])}
+                        options={AVAILABLE_VOICES}
                         onSave={(val) => handleUpdateField('voiceId', val)}
                     />
                     <EditableField
@@ -1622,13 +1752,25 @@ const NpcChat = ({ db, userId, npc, onBack, apiKey, isMobile = false, mobileView
                     {chatHistory.length > 0 && (
                         <>
                             <p className="text-sm text-gray-500">{chatHistory.length} messages</p>
-                            <button
-                                onClick={handleResetConversation}
-                                className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-full transition-colors"
-                                title="Reset Conversation"
-                            >
-                                <RotateCcw className="w-4 h-4" />
-                            </button>
+                            <div className="flex space-x-1">
+                                <button
+                                    onClick={() => setIsAutoPlayEnabled(!isAutoPlayEnabled)}
+                                    className={`p-1.5 rounded-full transition-colors ${isAutoPlayEnabled
+                                        ? 'text-indigo-600 bg-indigo-50 hover:bg-indigo-100'
+                                        : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'
+                                        }`}
+                                    title={isAutoPlayEnabled ? "Auto-play Enabled" : "Auto-play Disabled"}
+                                >
+                                    {isAutoPlayEnabled ? <Volume2 className="w-5 h-5" /> : <VolumeX className="w-5 h-5" />}
+                                </button>
+                                <button
+                                    onClick={handleResetConversation}
+                                    className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-full transition-colors"
+                                    title="Reset Conversation"
+                                >
+                                    <RotateCcw className="w-4 h-4" />
+                                </button>
+                            </div>
                         </>
                     )}
                 </div>
@@ -1659,8 +1801,8 @@ const NpcChat = ({ db, userId, npc, onBack, apiKey, isMobile = false, mobileView
                                 key={index}
                                 message={msg}
                                 npcName={npc.name}
-                                isSpeaking={isSpeaking && index === chatHistory.length - 1 && msg.role === 'npc'}
-                                onSpeakClick={handleSpeakClick}
+                                isSpeaking={playingMessageIndex === index}
+                                onSpeakClick={() => handleSpeakClick(msg.text, index)}
                             />
                         ))
                 )}
@@ -1748,14 +1890,27 @@ const NpcChat = ({ db, userId, npc, onBack, apiKey, isMobile = false, mobileView
                             </button>
                             <h3 className="text-lg font-semibold text-gray-800">{npc.name}</h3>
                         </div>
+
                         {chatHistory.length > 0 && (
-                            <button
-                                onClick={handleResetConversation}
-                                className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-full transition-colors"
-                                title="Reset Conversation"
-                            >
-                                <RotateCcw className="w-5 h-5" />
-                            </button>
+                            <div className="flex space-x-1">
+                                <button
+                                    onClick={() => setIsAutoPlayEnabled(!isAutoPlayEnabled)}
+                                    className={`p-1.5 rounded-full transition-colors ${isAutoPlayEnabled
+                                        ? 'text-indigo-600 bg-indigo-50 hover:bg-indigo-100'
+                                        : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'
+                                        }`}
+                                    title={isAutoPlayEnabled ? "Auto-play Enabled" : "Auto-play Disabled"}
+                                >
+                                    {isAutoPlayEnabled ? <Volume2 className="w-5 h-5" /> : <VolumeX className="w-5 h-5" />}
+                                </button>
+                                <button
+                                    onClick={handleResetConversation}
+                                    className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-full transition-colors"
+                                    title="Reset Conversation"
+                                >
+                                    <RotateCcw className="w-5 h-5" />
+                                </button>
+                            </div>
                         )}
                     </div>
                     {/* Chat Panel - Full Height */}
@@ -1783,8 +1938,8 @@ const NpcChat = ({ db, userId, npc, onBack, apiKey, isMobile = false, mobileView
                                             key={index}
                                             message={msg}
                                             npcName={npc.name}
-                                            isSpeaking={isSpeaking && index === chatHistory.length - 1 && msg.role === 'npc'}
-                                            onSpeakClick={handleSpeakClick}
+                                            isSpeaking={playingMessageIndex === index}
+                                            onSpeakClick={() => handleSpeakClick(msg.text, index)}
                                         />
                                     ))
                             )}
@@ -1827,7 +1982,7 @@ const NpcChat = ({ db, userId, npc, onBack, apiKey, isMobile = false, mobileView
                         imageUrl={currentImageUrl}
                         altText={npc.name}
                     />
-                </div>
+                </div >
             );
         }
     }
@@ -2240,7 +2395,11 @@ const NpcList = ({ npcs, onNpcSelected, db, userId, loading }) => {
 const NPCGeneratorChatbot = ({ user }) => {
     const userId = user.uid;
     const isAuthReady = true;
+
     const { npcs, loading } = useNPCs(db, userId, isAuthReady);
+
+    // Retrieve API key from environment variables
+    const apiKey = import.meta.env.GOOGLE_AI_API_KEY;
 
     const [selectedNpcId, setSelectedNpcId] = useState(null);
     const [showCreateForm, setShowCreateForm] = useState(false);
@@ -2356,7 +2515,9 @@ const NPCGeneratorChatbot = ({ user }) => {
                 isMobile={isMobile}
                 mobileView={mobileView}
                 onShowConversation={handleShowConversation}
+
                 onShowDetails={handleShowDetails}
+                apiKey={apiKey}
             />
         );
     } else if (showCreateForm) {
@@ -2365,7 +2526,9 @@ const NPCGeneratorChatbot = ({ user }) => {
                 <NpcCreation
                     db={db}
                     userId={userId}
+
                     onNpcCreated={handleNpcCreated}
+                    apiKey={apiKey}
                 />
             </div>
         );
