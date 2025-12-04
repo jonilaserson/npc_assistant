@@ -1058,7 +1058,7 @@ const NpcCreation = ({ db, userId, onNpcCreated }) => {
                         }
                     }}
                     rows="6"
-                    placeholder="E.g., A frail, old elven librarian named Elara who wears thick glasses and constantly dusts her shelves. She is a female, middle-aged elf. She pretends to be loyal to the Duke but is secretly a member of the anti-monarchy resistance seeking a lost treaty. She needs a rare book from the restricted section."
+                    placeholder="E.g., An elven librarian named Elara. She is frail, old and wears thick glasses. Constantly dusts her shelves. Secretly a member of the resistance."
                     className="w-full p-3 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500"
                 />
                 <Button
