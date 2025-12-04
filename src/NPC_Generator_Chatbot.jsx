@@ -2798,12 +2798,14 @@ const NPCGeneratorChatbot = ({ user, impersonatedUserId, onShowAdmin }) => {
                     <Button
                         onClick={handleCreateNew}
                         icon={Plus}
-                        className="bg-green-600 hover:bg-green-700"
+                        className="px-6 py-3 text-lg"
                     >
                         Create New NPC
                     </Button>
+
+
                 </div>
-            </div>
+            </div >
         );
     }
 

@@ -9,6 +9,7 @@ if (import.meta.env.VITE_SENTRY_DSN) {
     Sentry.init({
         dsn: import.meta.env.VITE_SENTRY_DSN,
         environment: import.meta.env.MODE,
+        release: "npc-assistant@0.0.0", // Fixed release version for debugging
         integrations: [
             Sentry.browserTracingIntegration(),
             Sentry.replayIntegration({
@@ -20,6 +21,8 @@ if (import.meta.env.VITE_SENTRY_DSN) {
         replaysSessionSampleRate: 0.1,
         replaysOnErrorSampleRate: 1.0,
     });
+} else {
+    console.error("Sentry DSN is missing! Check VITE_SENTRY_DSN in .env");
 }
 
 ReactDOM.createRoot(document.getElementById('root')).render(
