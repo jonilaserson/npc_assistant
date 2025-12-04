@@ -2450,9 +2450,9 @@ const NPCGeneratorChatbot = ({ user }) => {
         }
         setSelectedNpcId(null);
         setShowCreateForm(true);
-        // On mobile, ensure we show the create form
+        // On mobile, show the create form by setting view to 'details'
         if (isMobile) {
-            setMobileView('list'); // Will show create form via the conditional rendering
+            setMobileView('details'); // Changed from 'list' to 'details' to show create form
         }
     };
 
