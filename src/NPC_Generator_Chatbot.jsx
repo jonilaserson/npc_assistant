@@ -178,7 +178,7 @@ const fetchWithBackoff = async (url, options, retries = 5) => {
 /**
  * Generates structured NPC data (Personality, Wants, Secrets, Gender, Age) from a text description.
  */
-const generateStructuredNPC = async (description, apiKey) => {
+const generateStructuredNPC = async (description) => {
     if (!AVAILABLE_VOICES || AVAILABLE_VOICES.length === 0) {
         throw new Error("Configuration Error: AVAILABLE_VOICES list is missing or empty.");
     }
@@ -373,7 +373,7 @@ Respond with ONLY the prompt text, nothing else.`;
  * Sends a message to the NPC and gets a roleplaying response.
  * Includes formatting instructions for narration/dialogue.
  */
-const getNPCResponse = async (structuredData, chatHistory, apiKey) => {
+const getNPCResponse = async (structuredData, chatHistory) => {
     const systemPrompt = `You are roleplaying as the NPC named ${structuredData.name}.
         - **Race/Class:** ${structuredData.raceClass}
         - **Gender/Age:** ${structuredData.gender} ${structuredData.ageRange}
@@ -419,7 +419,7 @@ const getNPCResponse = async (structuredData, chatHistory, apiKey) => {
 /**
  * Regenerates a specific field of the NPC profile based on the rest of the data.
  */
-const regenerateNPCField = async (structuredData, field, apiKey) => {
+const regenerateNPCField = async (structuredData, field) => {
     const fieldDescriptions = {
         personality: "A concise, detailed summary of the NPC's disposition and mannerisms.",
         wants: "The NPC's primary goal or desire.",
@@ -472,7 +472,7 @@ const regenerateNPCField = async (structuredData, field, apiKey) => {
 /**
  * Expands a specific field of the NPC profile to be more detailed.
  */
-const expandNPCField = async (structuredData, field, apiKey) => {
+const expandNPCField = async (structuredData, field) => {
     const fieldDescriptions = {
         wants: "The NPC's primary goal or desire.",
         secrets: "A key secret the NPC hides, critical for plot development.",
@@ -526,7 +526,7 @@ const expandNPCField = async (structuredData, field, apiKey) => {
  * @param {object} structuredData - NPC profile data for voice selection.
  * @returns {Promise<string>} The Blob URL for the audio.
  */
-const textToSpeech = async (text, structuredData, apiKey) => {
+const textToSpeech = async (text, structuredData) => {
 
     // 1. FIX 2: Strip all content inside square brackets, including brackets and surrounding spaces/newlines.
     // This is the CRITICAL fix for preventing the voice from reading stage directions.
@@ -569,7 +569,7 @@ const textToSpeech = async (text, structuredData, apiKey) => {
         model: "gemini-2.5-flash-preview-tts"
     };
 
-    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:generateContent?key=${apiKey}`;
+    const apiUrl = `/.netlify/functions/gemini`;
 
     try {
         const response = await fetchWithBackoff(apiUrl, {
@@ -985,7 +985,7 @@ const LoadingIndicator = () => (
     </div>
 );
 
-const NpcCreation = ({ db, userId, onNpcCreated, apiKey }) => {
+const NpcCreation = ({ db, userId, onNpcCreated }) => {
     const [rawDescription, setRawDescription] = useState('');
     const [isGenerating, setIsGenerating] = useState(false);
     const [status, setStatus] = useState('');
@@ -1000,7 +1000,7 @@ const NpcCreation = ({ db, userId, onNpcCreated, apiKey }) => {
 
         try {
             // Step 1: Generate structured data
-            const structuredData = await generateStructuredNPC(rawDescription, apiKey);
+            const structuredData = await generateStructuredNPC(rawDescription);
             const npcName = structuredData.name || 'Unnamed NPC';
 
             // Step 2: Save to database (without image initially)
@@ -1206,7 +1206,7 @@ const ConfirmationModal = ({ isOpen, onClose, onConfirm, title, message }) => {
     );
 };
 
-const NpcChat = ({ db, userId, npc, onBack, apiKey, isMobile = false, mobileView = 'details', onShowConversation, onShowDetails }) => {
+const NpcChat = ({ db, userId, npc, onBack, isMobile = false, mobileView = 'details', onShowConversation, onShowDetails }) => {
     const [message, setMessage] = useState('');
     const [chatHistory, setChatHistory] = useState(npc.chats || []);
     const [isThinking, setIsThinking] = useState(false);
@@ -1307,7 +1307,7 @@ const NpcChat = ({ db, userId, npc, onBack, apiKey, isMobile = false, mobileView
             } else {
                 // Generate TTS using the NPC's structured data for voice selection
                 console.log('Generating new audio via API');
-                audioUrl = await textToSpeech(text, npc.structuredData, apiKey);
+                audioUrl = await textToSpeech(text, npc.structuredData);
 
                 // Cache the audio URL for future use
                 setAudioCache(prev => ({
@@ -1359,7 +1359,7 @@ const NpcChat = ({ db, userId, npc, onBack, apiKey, isMobile = false, mobileView
 
         try {
             // 2. Get NPC response (text only)
-            const npcResponseText = await getNPCResponse(npc.structuredData, newHistory, apiKey);
+            const npcResponseText = await getNPCResponse(npc.structuredData, newHistory);
             const npcMsg = { role: 'npc', text: npcResponseText, timestamp: new Date().toISOString() };
             const finalHistory = [...newHistory, npcMsg];
 
@@ -1487,7 +1487,7 @@ const NpcChat = ({ db, userId, npc, onBack, apiKey, isMobile = false, mobileView
 
     const handleRegenerateField = async (field) => {
         try {
-            return await regenerateNPCField(npc.structuredData, field, null);
+            return await regenerateNPCField(npc.structuredData, field);
         } catch (e) {
             console.error("Error regenerating field:", e);
             return null;
@@ -1496,7 +1496,7 @@ const NpcChat = ({ db, userId, npc, onBack, apiKey, isMobile = false, mobileView
 
     const handleExpandField = async (field) => {
         try {
-            return await expandNPCField(npc.structuredData, field, null);
+            return await expandNPCField(npc.structuredData, field);
         } catch (e) {
             console.error("Error expanding field:", e);
             return null;
@@ -2399,7 +2399,7 @@ const NPCGeneratorChatbot = ({ user }) => {
     const { npcs, loading } = useNPCs(db, userId, isAuthReady);
 
     // Retrieve API key from environment variables
-    const apiKey = import.meta.env.GOOGLE_AI_API_KEY;
+    const apiKey = null; // API Key removed. Using Netlify Functions.
 
     const [selectedNpcId, setSelectedNpcId] = useState(null);
     const [showCreateForm, setShowCreateForm] = useState(false);
@@ -2517,7 +2517,6 @@ const NPCGeneratorChatbot = ({ user }) => {
                 onShowConversation={handleShowConversation}
 
                 onShowDetails={handleShowDetails}
-                apiKey={apiKey}
             />
         );
     } else if (showCreateForm) {
@@ -2528,7 +2527,6 @@ const NPCGeneratorChatbot = ({ user }) => {
                     userId={userId}
 
                     onNpcCreated={handleNpcCreated}
-                    apiKey={apiKey}
                 />
             </div>
         );
