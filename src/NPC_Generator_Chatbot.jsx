@@ -4,6 +4,8 @@ import { collection, deleteDoc, doc, onSnapshot, orderBy, query, setDoc, updateD
 import { getDownloadURL, ref, uploadString } from 'firebase/storage';
 import { auth, db, storage } from './firebaseConfig';
 import { Loader2, Zap, Brain, Wand2, MessageSquare, List, Send, Volume2, VolumeX, User, ChevronsDown, ChevronsUp, RefreshCw, Trash2, X, ChevronLeft, ChevronRight, Plus, GripVertical, Check, RotateCcw, Edit2, Eye, EyeOff, Sparkles, Maximize2 } from 'lucide-react';
+import { FeedbackButton } from './components/FeedbackButton';
+import { logUsage } from './analytics';
 
 const magicalStyles = `
 @keyframes magic-wiggle {
@@ -1430,7 +1432,7 @@ const ConfirmationModal = ({ isOpen, onClose, onConfirm, title, message }) => {
     );
 };
 
-const NpcChat = ({ db, userId, npc, onBack, isMobile = false, mobileView = 'details', onShowConversation, onShowDetails }) => {
+const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileView = 'details', onShowConversation, onShowDetails }) => {
     const [message, setMessage] = useState('');
     const [chatHistory, setChatHistory] = useState(npc.chats || []);
     const [isThinking, setIsThinking] = useState(false);
@@ -1650,6 +1652,12 @@ const NpcChat = ({ db, userId, npc, onBack, isMobile = false, mobileView = 'deta
 
             const cloudinaryUrl = secure_url;
             const cloudinaryImageId = public_id;
+
+            // Log analytics
+            await logUsage(userId, userEmail, 'dalle', {
+                npcId: npc.id,
+                model: 'dall-e-3'
+            });
 
             // Step 3: Update the current display
             setCurrentImageUrl(cloudinaryUrl);
@@ -2506,6 +2514,11 @@ const CompactNpcList = ({ npcs, selectedNpcId, onNpcSelected, onNpcDelete, onCre
                     ))
                 )}
             </div>
+
+            {/* Feedback Button */}
+            <div className="p-4 border-t border-gray-200 bg-white">
+                <FeedbackButton />
+            </div>
         </div>
     );
 };
@@ -2633,8 +2646,10 @@ const NpcList = ({ npcs, onNpcSelected, db, userId, loading }) => {
 
 // --- Main Application Component (Unchanged) ---
 
-const NPCGeneratorChatbot = ({ user }) => {
-    const userId = user.uid;
+
+const NPCGeneratorChatbot = ({ user, impersonatedUserId, onShowAdmin }) => {
+    // Use impersonated user ID if set, otherwise use actual user ID
+    const userId = impersonatedUserId || user.uid;
     const isAuthReady = true;
 
     const { npcs, loading } = useNPCs(db, userId, isAuthReady);
@@ -2751,6 +2766,7 @@ const NPCGeneratorChatbot = ({ user }) => {
             <NpcChat
                 db={db}
                 userId={userId}
+                userEmail={user?.email}
                 npc={selectedNpc}
                 onBack={handleBackToList}
                 isMobile={isMobile}
@@ -2857,6 +2873,15 @@ const NPCGeneratorChatbot = ({ user }) => {
                         </p>
                     </div>
 
+                    {/* Admin Button - only show if user is admin */}
+                    {user?.email === import.meta.env.VITE_ADMIN_EMAIL && onShowAdmin && (
+                        <button
+                            onClick={onShowAdmin}
+                            className="mt-2 md:mt-0 px-4 py-2 bg-indigo-600 text-white text-sm rounded-lg hover:bg-indigo-700 transition-colors"
+                        >
+                            Admin Dashboard
+                        </button>
+                    )}
                 </div>
             </header>
 
