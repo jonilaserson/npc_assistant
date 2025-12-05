@@ -718,11 +718,11 @@ const geminiTTS = async (text, voiceName) => {
     // Check for API errors
     if (result.error) {
         const errorMsg = result.error.message || 'Unknown API error';
-        
+
         // Log full API error response for debugging (may include quota reset info)
         console.error('Gemini TTS API Error Response:', result.error);
         console.error('Full API result:', result);
-        
+
         // Log Gemini TTS API errors to Sentry
         Sentry.captureException(new Error(`Gemini TTS API Error: ${errorMsg}`), {
             tags: {
@@ -737,7 +737,7 @@ const geminiTTS = async (text, voiceName) => {
                 fullError: result.error
             }
         });
-        
+
         if (result.error.code === 429) {
             throw new Error('TTS quota exceeded. Please try again later.');
         }
@@ -760,34 +760,11 @@ const geminiTTS = async (text, voiceName) => {
 
         return URL.createObjectURL(wavBlob);
     } else {
-        console.error('Missing audio data or invalid mimeType:', { 
-            hasAudioData: !!audioData, 
+        console.error('Missing audio data or invalid mimeType:', {
+            hasAudioData: !!audioData,
             mimeType
         });
         throw new Error('Unable to generate audio. Please try again.');
-    }
-};
-
-/**
- * ElevenLabs TTS implementation
- */
-const elevenlabsTTS = async (text, voiceId) => {
-    const apiUrl = `/.netlify/functions/elevenlabs-tts`;
-
-    const response = await fetchWithBackoff(apiUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text, voiceId })
-    });
-    const result = await response.json();
-
-    if (result.audio && result.mimeType) {
-        // Convert base64 to blob
-        const audioData = base64ToArrayBuffer(result.audio);
-        const audioBlob = new Blob([audioData], { type: result.mimeType });
-        return URL.createObjectURL(audioBlob);
-    } else {
-        throw new Error("Invalid audio response from ElevenLabs.");
     }
 };
 
@@ -812,13 +789,14 @@ const textToSpeech = async (text, structuredData) => {
     // Use the LLM-selected voice if available, otherwise fallback to the map
     let selectedVoice = structuredData.voiceId;
 
-    // Clean up voice ID if it contains the description (e.g. "Fenrir (Male...)")
-    if (selectedVoice) {
-        selectedVoice = selectedVoice.split(' ')[0].trim();
-    }
-
-    // Get voice data to determine provider
+    // Try direct lookup first (matches "Charon (Male, Google HD)")
     let voiceData = getVoiceById(selectedVoice);
+
+    // If not found, try cleaning up (e.g. "Fenrir (Male...)" -> "Fenrir") for legacy/LLM formats
+    if (!voiceData && selectedVoice) {
+        const shortName = selectedVoice.split(' ')[0].trim();
+        voiceData = getVoiceById(shortName);
+    }
 
     // Validate and fallback if needed
     if (!voiceData) {
@@ -832,18 +810,63 @@ const textToSpeech = async (text, structuredData) => {
         }
     }
 
+    /**
+     * Helper to process the JSON response from TTS functions, checking for errors
+     * and converting the base64 audio to a Blob URL.
+     */
+    const processTTSResponse = async (response) => {
+        const data = await response.json();
+        if (data.error) {
+            throw new Error(data.error + (data.details ? `: ${data.details}` : ''));
+        }
+
+        // Base64 to Blob (MP3)
+        const byteCharacters = atob(data.audio);
+        const byteNumbers = new Array(byteCharacters.length);
+        for (let i = 0; i < byteCharacters.length; i++) {
+            byteNumbers[i] = byteCharacters.charCodeAt(i);
+        }
+        const byteArray = new Uint8Array(byteNumbers);
+        const blob = new Blob([byteArray], { type: 'audio/mpeg' });
+        return URL.createObjectURL(blob);
+    };
+
     try {
         // Route to appropriate TTS provider
+        console.log(`%c[TTS] Generating audio using provider: ${voiceData.provider} (Voice: ${voiceData.name})`, 'color: #0ea5e9; font-weight: bold;');
+
         if (voiceData.provider === 'gemini') {
             return await geminiTTS(dialogueOnly, voiceData.id);
         } else if (voiceData.provider === 'elevenlabs') {
-            return await elevenlabsTTS(dialogueOnly, voiceData.id);
+            // ElevenLabs TTS
+            const response = await fetchWithBackoff('/.netlify/functions/elevenlabs-tts', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    text: dialogueOnly,
+                    voiceId: voiceData.id
+                })
+            });
+            return await processTTSResponse(response);
+
+        } else if (voiceData.provider === 'google') {
+            // Google Cloud TTS
+            const response = await fetchWithBackoff('/.netlify/functions/google-tts', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    text: dialogueOnly,
+                    voiceId: voiceData.id
+                })
+            });
+            return await processTTSResponse(response);
+
         } else {
             throw new Error(`Unknown voice provider: ${voiceData.provider}`);
         }
     } catch (e) {
         console.error("TTS Generation Error:", e.message);
-        
+
         // Only log critical errors to Sentry (quota, API failures)
         if (e.message.includes('quota') || e.message.includes('API error') || e.message.includes('503') || e.message.includes('429')) {
             Sentry.captureException(e, {
@@ -858,7 +881,7 @@ const textToSpeech = async (text, structuredData) => {
                 }
             });
         }
-        
+
         throw new Error(`Failed to generate voice: ${e.message}`);
     }
 };
@@ -1586,7 +1609,7 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
             } else {
                 // Generate TTS using the NPC's structured data for voice selection
                 audioUrl = await textToSpeech(text, npc.structuredData);
-                
+
                 if (!audioUrl) {
                     throw new Error('TTS returned empty audio URL');
                 }
@@ -1629,7 +1652,7 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
             };
         } catch (e) {
             console.error("TTS Error:", e.message);
-            
+
             // Only log critical TTS errors to Sentry (quota, API failures)
             if (e.message.includes('quota') || e.message.includes('API') || e.message.includes('service')) {
                 Sentry.captureException(e, {
@@ -1646,7 +1669,7 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
                     }
                 });
             }
-            
+
             setPlayingMessageIndex(null);
         }
     };

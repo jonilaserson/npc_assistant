@@ -68,14 +68,17 @@ const ELEVENLABS_VOICES = [
     { id: "EiNlNiXeDU1pqqOPrYMO", name: "John Doe", gender: "Male", age: "Adult", accent: "American", description: "Very deep voice, perfect for audiobooks" }
 ];
 
+// Google Cloud Neural2 Voices
+// Google Cloud Voices (Chirp 3 HD) mapped directly from Gemini definitions below
+
 // Create unified voice objects
 const VOICES = [
-    // Gemini voices
+    // Gemini voices (Mapped to Google Chirp 3 HD)
     ...GEMINI_VOICES.map(v => ({
-        id: v.name,
-        name: v.name,
-        displayName: `${v.name} (${v.gender}, ${v.age}, ${v.descriptors})`,
-        provider: "gemini",
+        id: `en-US-Chirp3-HD-${v.name}`, // Use Google ID
+        name: v.name, // Keep short name for lookup
+        displayName: `${v.name} (${v.gender}, ${v.age}, ${v.descriptors})`, // Original Gemini description
+        provider: "google", // Route to Google TTS
         gender: v.gender.toLowerCase(),
         age: v.age.toLowerCase(),
         description: v.descriptors
@@ -139,6 +142,7 @@ export const getVoiceById = (nameOrId) => {
     return VOICE_DATA.find(v =>
         v.name === searchTerm ||
         v.id === searchTerm ||
+        v.displayName === searchTerm ||
         v.displayName.startsWith(searchTerm + ' ')
     ) || null;
 };
