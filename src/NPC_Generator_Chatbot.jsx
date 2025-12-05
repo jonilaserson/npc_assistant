@@ -6,6 +6,7 @@ import { auth, db, storage } from './firebaseConfig';
 import { Loader2, Zap, Brain, Wand2, MessageSquare, List, Send, Volume2, VolumeX, User, ChevronsDown, ChevronsUp, RefreshCw, Trash2, X, ChevronLeft, ChevronRight, Plus, GripVertical, Check, RotateCcw, Edit2, Eye, EyeOff, Sparkles, Maximize2 } from 'lucide-react';
 import { FeedbackButton } from './components/FeedbackButton';
 import { logUsage } from './analytics';
+import * as Sentry from "@sentry/react";
 
 const magicalStyles = `
 @keyframes magic-wiggle {
@@ -717,6 +718,26 @@ const geminiTTS = async (text, voiceName) => {
     // Check for API errors
     if (result.error) {
         const errorMsg = result.error.message || 'Unknown API error';
+        
+        // Log full API error response for debugging (may include quota reset info)
+        console.error('Gemini TTS API Error Response:', result.error);
+        console.error('Full API result:', result);
+        
+        // Log Gemini TTS API errors to Sentry
+        Sentry.captureException(new Error(`Gemini TTS API Error: ${errorMsg}`), {
+            tags: {
+                feature: 'gemini_tts',
+                api_error: true
+            },
+            extra: {
+                errorCode: result.error.code,
+                errorMessage: errorMsg,
+                voiceName: voiceName,
+                textLength: text.length,
+                fullError: result.error
+            }
+        });
+        
         if (result.error.code === 429) {
             throw new Error('TTS quota exceeded. Please try again later.');
         }
@@ -728,8 +749,8 @@ const geminiTTS = async (text, voiceName) => {
     const mimeType = part?.inlineData?.mimeType;
 
     if (audioData && mimeType && mimeType.startsWith("audio/")) {
-        // Get the sample rate from the mimeType (e.g., audio/L16;rate=24000)
-        const rateMatch = mimeType.match(/(\d+)/);
+        // Get the sample rate from the mimeType (e.g., audio/L16;codec=pcm;rate=24000)
+        const rateMatch = mimeType.match(/rate=(\d+)/);
         const sampleRate = rateMatch ? parseInt(rateMatch[1], 10) : 24000;
 
         // Convert PCM to WAV
@@ -739,6 +760,10 @@ const geminiTTS = async (text, voiceName) => {
 
         return URL.createObjectURL(wavBlob);
     } else {
+        console.error('Missing audio data or invalid mimeType:', { 
+            hasAudioData: !!audioData, 
+            mimeType
+        });
         throw new Error('Unable to generate audio. Please try again.');
     }
 };
@@ -817,7 +842,23 @@ const textToSpeech = async (text, structuredData) => {
             throw new Error(`Unknown voice provider: ${voiceData.provider}`);
         }
     } catch (e) {
-        console.error("Error generating TTS:", e.message);
+        console.error("TTS Generation Error:", e.message);
+        
+        // Only log critical errors to Sentry (quota, API failures)
+        if (e.message.includes('quota') || e.message.includes('API error') || e.message.includes('503') || e.message.includes('429')) {
+            Sentry.captureException(e, {
+                tags: {
+                    feature: 'tts_critical',
+                    provider: voiceData?.provider || 'unknown'
+                },
+                extra: {
+                    voiceId: voiceData?.id,
+                    textLength: dialogueOnly.length,
+                    errorMessage: e.message
+                }
+            });
+        }
+        
         throw new Error(`Failed to generate voice: ${e.message}`);
     }
 };
@@ -1331,7 +1372,6 @@ const ChatBubble = ({ message, npcName, isSpeaking, onSpeakClick }) => {
     const isScene = message.role === 'scene';
 
     // Function to extract only the dialogue for display/TTS purposes
-    // FIX 2.1: Use the robust stripping regex here too, just in case, though the main fix is in textToSpeech.
     const getDialogueText = (text) => text.replace(/ *\[[\s\S]*?\] */g, '').trim();
 
     if (isScene) {
@@ -1513,7 +1553,6 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
         if (audioPlayer) {
             audioPlayer.pause();
             audioPlayer.currentTime = 0;
-            // FIX: Ensure state resets immediately for a responsive stop button
             setPlayingMessageIndex(null);
         }
     }, [audioPlayer]);
@@ -1543,12 +1582,14 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
 
             // Check if we have this audio cached
             if (audioCache[text]) {
-                console.log('Using cached audio for message');
                 audioUrl = audioCache[text];
             } else {
                 // Generate TTS using the NPC's structured data for voice selection
-                console.log('Generating new audio via API');
                 audioUrl = await textToSpeech(text, npc.structuredData);
+                
+                if (!audioUrl) {
+                    throw new Error('TTS returned empty audio URL');
+                }
 
                 // Log TTS usage for analytics
                 const voiceId = npc.structuredData.voiceId?.split(' ')[0]?.trim();
@@ -1583,13 +1624,29 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
                 // Don't revoke cached URLs - keep them for replay
             };
             audioPlayer.onerror = (e) => {
-                console.error("Audio playback failed during play:", e);
-                // FIX: Replace alert with console error and state reset
+                console.error("Audio playback error:", audioPlayer.error?.message || e);
                 setPlayingMessageIndex(null);
             };
         } catch (e) {
-            console.error("TTS Click Error:", e);
-            // FIX: Replace alert with console error and state reset
+            console.error("TTS Error:", e.message);
+            
+            // Only log critical TTS errors to Sentry (quota, API failures)
+            if (e.message.includes('quota') || e.message.includes('API') || e.message.includes('service')) {
+                Sentry.captureException(e, {
+                    tags: {
+                        feature: 'tts_critical',
+                        user_action: 'speak_button'
+                    },
+                    extra: {
+                        npcId: npc?.id,
+                        npcName: npc?.name,
+                        messageIndex: index,
+                        textLength: text?.length || 0,
+                        errorMessage: e.message
+                    }
+                });
+            }
+            
             setPlayingMessageIndex(null);
         }
     };
@@ -1709,7 +1766,6 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
                 }
             }
         } catch (error) {
-            // FIX: Replace alert with console error
             console.error(`Error regenerating image: ${error.message}`);
         } finally {
             setIsImageGenerating(false);

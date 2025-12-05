@@ -43,8 +43,6 @@ export const logUsage = async (userId, email, type, metadata = {}) => {
             estimatedCost: cost,
             metadata
         });
-
-        console.log(`[Analytics] Logged ${type} usage for ${email}, cost: $${cost}`);
     } catch (error) {
         console.error('Error logging usage:', error);
     }
@@ -67,8 +65,6 @@ export const trackUser = async (userId, email, displayName = null) => {
             lastSeen: serverTimestamp(),
             createdAt: serverTimestamp()
         }, { merge: true });
-
-        console.log(`[Analytics] Tracked user: ${email}`);
     } catch (error) {
         console.error('Error tracking user:', error);
     }
