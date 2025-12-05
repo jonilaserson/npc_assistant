@@ -334,6 +334,13 @@ const generateStructuredNPC = async (description) => {
 
         parsedData.voiceId = selectedVoice || null;
 
+        if (selectedVoice) {
+            const voiceData = getVoiceById(selectedVoice.split(' ')[0]);
+            if (voiceData) {
+                console.log(`voice_id: ${voiceData.id} (${voiceData.provider === 'elevenlabs' ? 'Elevenlabs' : 'Google TTS'})`);
+            }
+        }
+
         // Remove the candidates field from the final object to match expected structure
         delete parsedData.voiceCandidates;
 
@@ -1798,6 +1805,13 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
     const handleUpdateField = async (field, value) => {
         // Optimistic update handled by Firestore listener, but we can also log it.
         console.log(`Updating ${field} to:`, value);
+
+        if (field === 'voiceId' && value) {
+            const voiceData = getVoiceById(value.split(' ')[0]);
+            if (voiceData) {
+                console.log(`voice_id: ${voiceData.id} (${voiceData.provider === 'elevenlabs' ? 'Elevenlabs' : 'Google TTS'})`);
+            }
+        }
 
         if (!db) return;
 

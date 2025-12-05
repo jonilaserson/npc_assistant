@@ -68,7 +68,6 @@ const ELEVENLABS_VOICES = [
     { id: "EiNlNiXeDU1pqqOPrYMO", name: "John Doe", gender: "Male", age: "Adult", accent: "American", description: "Very deep voice, perfect for audiobooks" }
 ];
 
-// Google Cloud Neural2 Voices
 // Google Cloud Voices (Chirp 3 HD) mapped directly from Gemini definitions below
 
 // Create unified voice objects
