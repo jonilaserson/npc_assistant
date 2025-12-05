@@ -713,13 +713,23 @@ const geminiTTS = async (text, voiceName) => {
         body: JSON.stringify(payload)
     });
     const result = await response.json();
+
+    // Check for API errors
+    if (result.error) {
+        const errorMsg = result.error.message || 'Unknown API error';
+        if (result.error.code === 429) {
+            throw new Error('TTS quota exceeded. Please try again later.');
+        }
+        throw new Error('TTS service temporarily unavailable.');
+    }
+
     const part = result?.candidates?.[0]?.content?.parts?.[0];
     const audioData = part?.inlineData?.data;
     const mimeType = part?.inlineData?.mimeType;
 
     if (audioData && mimeType && mimeType.startsWith("audio/")) {
         // Get the sample rate from the mimeType (e.g., audio/L16;rate=24000)
-        const rateMatch = mimeType.match(/rate=(\d+)/);
+        const rateMatch = mimeType.match(/(\d+)/);
         const sampleRate = rateMatch ? parseInt(rateMatch[1], 10) : 24000;
 
         // Convert PCM to WAV
@@ -729,7 +739,7 @@ const geminiTTS = async (text, voiceName) => {
 
         return URL.createObjectURL(wavBlob);
     } else {
-        throw new Error("Invalid audio response structure or MIME type.");
+        throw new Error('Unable to generate audio. Please try again.');
     }
 };
 
@@ -807,8 +817,8 @@ const textToSpeech = async (text, structuredData) => {
             throw new Error(`Unknown voice provider: ${voiceData.provider}`);
         }
     } catch (e) {
-        console.error("Error generating TTS:", e);
-        throw new Error("Failed to generate voice output.");
+        console.error("Error generating TTS:", e.message);
+        throw new Error(`Failed to generate voice: ${e.message}`);
     }
 };
 
@@ -1248,7 +1258,12 @@ const NpcCreation = ({ db, userId, onNpcCreated }) => {
             await setDoc(newNpcRef, npcData);
             setStatus(`NPC "${npcName}" created successfully!`);
 
-
+            // Log NPC creation for analytics
+            const userEmail = auth.currentUser?.email || 'unknown';
+            await logUsage(userId, userEmail, 'npc_created', {
+                npcId: newNpcRef.id,
+                npcName: npcName
+            });
 
             // Step 3: Skip initial image generation (as per new safeguard)
             // We leave imageUrl as null so the user sees the "Image not saved" placeholder.
@@ -1535,6 +1550,17 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
                 console.log('Generating new audio via API');
                 audioUrl = await textToSpeech(text, npc.structuredData);
 
+                // Log TTS usage for analytics
+                const voiceId = npc.structuredData.voiceId?.split(' ')[0]?.trim();
+                const voiceData = getVoiceById(voiceId);
+                const ttsType = voiceData?.provider === 'elevenlabs' ? 'elevenlabs_tts' : 'gemini_tts';
+
+                await logUsage(userId, userEmail, ttsType, {
+                    npcId: npc.id,
+                    npcName: npc.name,
+                    voiceId: voiceId
+                });
+
                 // Cache the audio URL for future use
                 setAudioCache(prev => ({
                     ...prev,
@@ -1597,6 +1623,13 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
             });
 
             setChatHistory(finalHistory);
+
+            // Log chat message for analytics
+            await logUsage(userId, userEmail, 'gemini_chat', {
+                npcId: npc.id,
+                npcName: npc.name,
+                messageCount: finalHistory.length
+            });
 
             // 4. Auto-play if enabled
             if (isAutoPlayEnabled) {
@@ -2875,8 +2908,8 @@ const NPCGeneratorChatbot = ({ user, impersonatedUserId, onShowAdmin }) => {
                         </p>
                     </div>
 
-                    {/* Admin Button - only show if user is admin */}
-                    {user?.email === import.meta.env.VITE_ADMIN_EMAIL && onShowAdmin && (
+                    {/* Admin Button - only show if user is admin and not impersonating */}
+                    {user?.email === import.meta.env.VITE_ADMIN_EMAIL && !impersonatedUserId && onShowAdmin && (
                         <button
                             onClick={onShowAdmin}
                             className="mt-2 md:mt-0 px-4 py-2 bg-indigo-600 text-white text-sm rounded-lg hover:bg-indigo-700 transition-colors"

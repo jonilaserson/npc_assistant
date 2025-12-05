@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { collection, query, getDocs, orderBy, where } from 'firebase/firestore';
+import { collection, query, getDocs, orderBy, where, getCountFromServer } from 'firebase/firestore';
 import { db } from '../firebaseConfig';
-import { Users, DollarSign, Image, MessageSquare, ArrowLeft, Eye, Loader2, TrendingUp } from 'lucide-react';
+import { Users, DollarSign, Image, UserCircle, ArrowLeft, Eye, Loader2, Volume2, UserPlus } from 'lucide-react';
+import { formatDistanceToNow, format, isWithinInterval, subHours } from 'date-fns';
 
 export const AdminDashboard = ({ user, onExit, onImpersonate }) => {
     const [users, setUsers] = useState([]);
@@ -23,10 +24,29 @@ export const AdminDashboard = ({ user, onExit, onImpersonate }) => {
         try {
             // Load all users
             const usersSnapshot = await getDocs(collection(db, 'all_users'));
-            const usersData = usersSnapshot.docs.map(doc => ({
-                id: doc.id,
-                ...doc.data()
-            }));
+
+            // Fetch NPC counts for each user
+            const usersDataPromises = usersSnapshot.docs.map(async doc => {
+                const userData = doc.data();
+                const userId = doc.id;
+
+                let npcCount = 0;
+                try {
+                    const npcsColl = collection(db, `users/${userId}/npcs`);
+                    const snapshot = await getCountFromServer(npcsColl);
+                    npcCount = snapshot.data().count;
+                } catch (e) {
+                    console.warn(`Could not fetch NPC count for user ${userId}`, e);
+                }
+
+                return {
+                    id: userId,
+                    ...userData,
+                    npcCount
+                };
+            });
+
+            const usersData = await Promise.all(usersDataPromises);
 
             // Load all usage logs
             const logsSnapshot = await getDocs(
@@ -75,12 +95,50 @@ export const AdminDashboard = ({ user, onExit, onImpersonate }) => {
     };
 
     // Calculate overall stats
+    const totalActiveNPCs = users.reduce((sum, user) => sum + (user.npcCount || 0), 0);
+    const totalNPCsCreated = usageLogs.filter(log => log.type === 'npc_created').length;
+
     const overallStats = {
         totalUsers: users.length,
+        totalActiveNPCs,
+        totalNPCsCreated,
         totalDalleImages: usageLogs.filter(log => log.type === 'dalle').length,
         totalTTSCalls: usageLogs.filter(log => log.type === 'gemini_tts' || log.type === 'elevenlabs_tts').length,
         totalCost: usageLogs.reduce((sum, log) => sum + (log.estimatedCost || 0), 0).toFixed(2),
         totalFeedback: feedback.length
+    };
+
+    // Format last seen timestamp
+    const formatLastSeen = (lastSeenTimestamp) => {
+        if (!lastSeenTimestamp?.toDate) {
+            return { display: 'N/A', tooltip: 'Never seen' };
+        }
+
+        try {
+            const date = lastSeenTimestamp.toDate();
+            const fullTimestamp = format(date, 'MMM d, yyyy HH:mm');
+            const now = new Date();
+            const twelveHoursAgo = subHours(now, 12);
+
+            // If within last 12 hours, show relative time with full timestamp as tooltip
+            if (isWithinInterval(date, { start: twelveHoursAgo, end: now })) {
+                const relativeTime = formatDistanceToNow(date, { addSuffix: true });
+                return { display: relativeTime, tooltip: fullTimestamp };
+            }
+
+            // Otherwise show full date and time
+            return { display: fullTimestamp, tooltip: fullTimestamp };
+        } catch (error) {
+            // Fallback if any date formatting fails
+            console.warn('Error formatting last seen:', error);
+            try {
+                const date = lastSeenTimestamp.toDate();
+                const fallback = format(date, 'MMM d, yyyy HH:mm');
+                return { display: fallback, tooltip: fallback };
+            } catch {
+                return { display: 'N/A', tooltip: 'Invalid date' };
+            }
+        }
     };
 
     if (!isAdmin) {
@@ -121,12 +179,24 @@ export const AdminDashboard = ({ user, onExit, onImpersonate }) => {
                 </div>
 
                 {/* Summary Cards */}
-                <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+                <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-6 mb-8">
                     <StatCard
                         icon={Users}
                         label="Total Users"
                         value={overallStats.totalUsers}
                         color="blue"
+                    />
+                    <StatCard
+                        icon={UserCircle}
+                        label="Active NPCs"
+                        value={overallStats.totalActiveNPCs}
+                        color="green"
+                    />
+                    <StatCard
+                        icon={UserPlus}
+                        label="NPCs Created"
+                        value={overallStats.totalNPCsCreated}
+                        color="indigo"
                     />
                     <StatCard
                         icon={Image}
@@ -135,7 +205,7 @@ export const AdminDashboard = ({ user, onExit, onImpersonate }) => {
                         color="purple"
                     />
                     <StatCard
-                        icon={MessageSquare}
+                        icon={Volume2}
                         label="TTS Calls"
                         value={overallStats.totalTTSCalls}
                         color="green"
@@ -159,6 +229,9 @@ export const AdminDashboard = ({ user, onExit, onImpersonate }) => {
                                 <tr>
                                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                                         Email
+                                    </th>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                        Active NPCs
                                     </th>
                                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                                         Images
@@ -189,6 +262,9 @@ export const AdminDashboard = ({ user, onExit, onImpersonate }) => {
                                                 {userData.email}
                                             </td>
                                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
+                                                {userData.npcCount || 0}
+                                            </td>
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
                                                 {stats.dalleCount}
                                             </td>
                                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
@@ -200,8 +276,8 @@ export const AdminDashboard = ({ user, onExit, onImpersonate }) => {
                                             <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-gray-900">
                                                 ${stats.totalCost}
                                             </td>
-                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
-                                                {userData.lastSeen?.toDate ? new Date(userData.lastSeen.toDate()).toLocaleDateString() : 'N/A'}
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600" title={formatLastSeen(userData.lastSeen).tooltip}>
+                                                {formatLastSeen(userData.lastSeen).display}
                                             </td>
                                             <td className="px-6 py-4 whitespace-nowrap text-sm">
                                                 <button
@@ -254,7 +330,8 @@ const StatCard = ({ icon: Icon, label, value, color }) => {
         blue: 'bg-blue-100 text-blue-600',
         purple: 'bg-purple-100 text-purple-600',
         green: 'bg-green-100 text-green-600',
-        red: 'bg-red-100 text-red-600'
+        red: 'bg-red-100 text-red-600',
+        indigo: 'bg-indigo-100 text-indigo-600'
     };
 
     return (
