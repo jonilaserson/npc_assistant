@@ -2742,7 +2742,7 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
             </div>
 
             {/* Chat History Container - Scrollable */}
-            <div id="chat-container" className="flex-1 p-6 space-y-4 overflow-y-auto bg-gray-50">
+            <div id="chat-container" className="flex-1 px-2 sm:px-6 py-6 space-y-4 overflow-y-auto bg-gray-50">
                 {chatHistory.length === 0 ? (
                     <div 
                         className="flex flex-col items-center justify-center h-full p-8 text-center space-y-6 animate-fade-in relative"
@@ -2757,7 +2757,7 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
                         {!isSceneWizardOpen ? (
                             <div 
                                 className='animate-fade-in flex flex-col items-center'
-                                style={{width: '571px', minWidth: '571px', maxWidth: '100vw'}}
+                                style={{width: '571px', minWidth: '571px', maxWidth: '85vw'}}
                             >
                                 <MessageSquare className="w-16 h-16 mx-auto mb-4 text-gray-200" />
                                 <h3 className="text-xl font-bold text-gray-400 mb-2">Ready to Chat</h3>
@@ -3003,11 +3003,11 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
                     {/* Chat Panel - Full Height */}
                     <div className="flex-1 overflow-hidden">
                         {/* Chat History Container - Scrollable */}
-                        <div id="chat-container" className="h-full p-6 space-y-4 overflow-y-auto bg-gray-50">
+                        <div id="chat-container" className="h-full px-2 sm:px-6 py-6 space-y-4 overflow-y-auto bg-gray-50">
                             {chatHistory.length === 0 ? (
                                 <div 
                                     className="flex flex-col items-center justify-center h-full p-8 text-center space-y-6 animate-fade-in"
-                                    style={{overflow: 'visible'}}
+                                    style={{overflow: 'visible', width: '100%', maxWidth: '100%'}}
                                 >
                                     {isGeneratingScene ? (
                                         <div className="flex flex-col items-center text-indigo-600">
