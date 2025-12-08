@@ -352,6 +352,54 @@ const generateStructuredNPC = async (description) => {
 };
 
 /**
+ * Generates a starting scene description, context, and goal for a new conversation.
+ */
+const generateStartingScene = async (npcData) => {
+    const systemPrompt = `You are a creative Dungeon Master helper. Your task is to generate a concise starting scene for a roleplay conversation with the following NPC.
+    
+    NPC: ${npcData.name} (${npcData.raceClass})
+    Personality: ${npcData.personality}
+    Principal Desire/Want: ${npcData.wants}
+    Current Location/Context: The user is about to start a conversation with this NPC.
+    
+    Output Format:
+    Location: [Where the scene takes place]
+
+    Context: [What the NPC is doing and how the User encountered them]
+
+    Goal: [A specific objective for the User to achieve in this conversation]
+    
+    Requirements:
+    - Keep "Context" and "Goal" extremly short (max 1 sentence each).
+    - Ensure the scene is related to the NPC's "Principal Desire/Want".
+    - Separate the three sections (Location, Context, Goal) with an empty line between them.
+    - Do not use markdown bolding in the output logic, just plain text headers are fine.
+    `;
+
+    const payload = {
+        contents: [{ parts: [{ text: "Generate a starting scene." }] }],
+        systemInstruction: { parts: [{ text: systemPrompt }] }
+    };
+
+    const apiUrl = `/.netlify/functions/gemini`;
+
+    try {
+        const response = await fetchWithBackoff(apiUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        const result = await response.json();
+        const text = result.candidates?.[0]?.content?.parts?.[0]?.text;
+        if (!text) throw new Error("Model returned no text response.");
+        return text.trim();
+    } catch (e) {
+        console.error("Error generating starting scene:", e);
+        throw new Error("Failed to generate starting scene.");
+    }
+};
+
+/**
  * Generates an image for the NPC using OpenAI's DALL-E 3.
  * Uses a two-step process: first asks an LLM to create the perfect DALL-E prompt,
  * then generates the image with that optimized prompt.
@@ -940,13 +988,19 @@ function useNPCs(db, userId, isAuthReady) {
 
 // --- Editable Field Component ---
 
-const EditableField = ({ label, value, displayValue, onSave, onRegenerate, onExpand, type = 'text', options = [], className = '', hideLabel = false, textClassName = '' }) => {
+const EditableField = ({ label, value, displayValue, onSave, onRegenerate, onExpand, type = 'text', options = [], className = '', hideLabel = false, textClassName = '', stayInModeAfterRegenerate = false, onEditStateChange, rows = 6 }) => {
     const [isEditing, setIsEditing] = useState(false);
     const [tempValue, setTempValue] = useState(value);
     const [isSaving, setIsSaving] = useState(false);
     const [isRegenerating, setIsRegenerating] = useState(false);
     const [isExpanding, setIsExpanding] = useState(false);
     const selectRef = useRef(null);
+
+    useEffect(() => {
+        if (onEditStateChange) {
+            onEditStateChange(isEditing);
+        }
+    }, [isEditing, onEditStateChange]);
 
     useEffect(() => {
         setTempValue(value);
@@ -1010,7 +1064,7 @@ const EditableField = ({ label, value, displayValue, onSave, onRegenerate, onExp
                 setTempValue(newValue);
 
                 // For select fields, auto-save the new value
-                // For textarea/text fields, enter edit mode to review
+                // For textarea/text fields, enter edit mode to review unless stayInModeAfterRegenerate is true
                 if (type === 'select') {
                     // Auto-save for select fields
                     try {
@@ -1022,8 +1076,18 @@ const EditableField = ({ label, value, displayValue, onSave, onRegenerate, onExp
                         setIsEditing(true);
                     }
                 } else {
-                    // For other field types, enter edit mode to review
-                    setIsEditing(true);
+                    if (stayInModeAfterRegenerate) {
+                        // Automatically save and stay in view mode
+                        try {
+                            await onSave(newValue);
+                        } catch (error) {
+                            console.error("Failed to save regenerated value:", error);
+                            setIsEditing(true);
+                        }
+                    } else {
+                        // Enter edit mode to review
+                        setIsEditing(true);
+                    }
                 }
             }
         } catch (error) {
@@ -1061,7 +1125,7 @@ const EditableField = ({ label, value, displayValue, onSave, onRegenerate, onExp
 
     if (isEditing) {
         return (
-            <div className={`mb-2 p-2 bg-white rounded-lg border border-indigo-300 shadow-sm ${className}`}>
+            <div className={`p-2 bg-white rounded-lg border border-indigo-300 shadow-sm w-full ${className}`}>
                 <style>{magicalStyles}</style>
                 <div className="flex items-center justify-between mb-1">
                     {!hideLabel && <label className="block text-xs font-bold text-indigo-700">{label}</label>}
@@ -1102,18 +1166,14 @@ const EditableField = ({ label, value, displayValue, onSave, onRegenerate, onExp
                         )}
                     </div>
                 </div>
-                <div className="flex items-start space-x-2 max-w-full overflow-hidden">
+                <div className="flex items-start space-x-2">
                     {type === 'textarea' ? (
                         <textarea
                             value={tempValue}
                             onChange={(e) => setTempValue(e.target.value)}
-                            onKeyDown={(e) => {
-                                if (e.key === 'Escape') {
-                                    handleCancel();
-                                }
-                            }}
-                            className="flex-1 p-2 text-sm border border-gray-300 rounded focus:ring-indigo-500 focus:border-indigo-500"
-                            rows={8}
+                            onKeyDown={handleKeyDown}
+                            className="flex-1 p-2 border border-gray-300 rounded focus:ring-indigo-500 focus:border-indigo-500 text-sm resize-none"
+                            rows={rows}
                             autoFocus
                         />
                     ) : type === 'select' ? (
@@ -1170,7 +1230,6 @@ const EditableField = ({ label, value, displayValue, onSave, onRegenerate, onExp
                                     handleCancel();
                                 }
                             }}
-                            onBlur={handleSave}
                             className={`flex-1 p-2 border border-gray-300 rounded focus:ring-indigo-500 focus:border-indigo-500 break-words ${textClassName || 'text-sm'}`}
                             autoFocus
                             disabled={isSaving}
@@ -1407,14 +1466,11 @@ const ChatBubble = ({ message, npcName, isSpeaking, onSpeakClick }) => {
     if (isScene) {
         return (
             <div className="flex w-full justify-center my-4">
-                <div className={`w-[80%] max-w-lg p-4 rounded-lg shadow-sm text-left border-2 ${message.isHidden
-                    ? 'bg-red-50 border-red-500' // Hidden scene style
-                    : 'bg-indigo-50 border-indigo-500' // Regular scene style
-                    }`}>
-                    <p className={`text-xs font-bold uppercase tracking-wider mb-1 opacity-70 ${message.isHidden ? 'text-red-700' : 'text-indigo-700'}`}>
-                        {message.isHidden ? 'Secret Scene' : 'Scene'}
+                <div className="w-[80%] max-w-lg p-4 rounded-lg shadow-sm text-left border-2 bg-indigo-50 border-indigo-500">
+                    <p className="text-xs font-bold uppercase tracking-wider mb-1 opacity-70 text-indigo-700">
+                        Scene
                     </p>
-                    <p className="font-mono text-sm italic text-gray-900">{message.text}</p>
+                    <p className="font-mono text-sm italic text-gray-900 whitespace-pre-wrap">{message.text}</p>
                 </div>
             </div>
         );
@@ -1531,14 +1587,26 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
     const [isImageModalOpen, setIsImageModalOpen] = useState(false);
 
     // Scene State
-    const [sceneDescription, setSceneDescription] = useState('');
-    const [showHiddenScenes, setShowHiddenScenes] = useState(true);
+    const [startingSceneText, setStartingSceneText] = useState('');
+    const [isGeneratingScene, setIsGeneratingScene] = useState(false);
+    const [isSceneWizardOpen, setIsSceneWizardOpen] = useState(false);
+    const [isEditingSceneField, setIsEditingSceneField] = useState(false);
+
+    // Cache for generated scenes: { [npcId]: "scene text" }
+    const sceneCache = useRef({});
 
     // Ref for message input to maintain focus
     const messageInputRef = useRef(null);
 
     // Load initial chat history and audio player on component mount
     useEffect(() => {
+        // Reset scene state when NPC changes
+        // Reset scene state when NPC changes
+        setStartingSceneText(sceneCache.current[npc.id] || '');
+        setIsSceneWizardOpen(false);
+        setIsGeneratingScene(false);
+        setIsEditingSceneField(false);
+
         setChatHistory(npc.chats || []);
         // Load the saved Cloudinary image URL if it exists
         setCurrentImageUrl(npc.imageUrl || null);
@@ -1684,6 +1752,45 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
     const handleSend = async () => {
         const text = message.trim();
         if (!text || isThinking) return;
+
+        // Check for slash command /scene
+        if (text.toLowerCase().startsWith('/scene')) {
+            const sceneText = text.substring(6).trim();
+            if (!sceneText) return; // Ignore empty scene commands
+
+            stopAudio();
+            setMessage('');
+
+            const sceneMsg = { role: 'scene', text: sceneText, timestamp: new Date().toISOString() };
+            const newHistory = [...chatHistory, sceneMsg];
+
+            setChatHistory(newHistory);
+            scrollToBottom('chat-container');
+
+            if (db) {
+                try {
+                    const npcRef = doc(db, npcCollectionPath(appId, userId), npc.id);
+                    await updateDoc(npcRef, {
+                        chats: newHistory,
+                        updatedAt: new Date().toISOString()
+                    });
+
+                    // Log usage
+                    await logUsage(userId, userEmail, 'scene_command', {
+                        npcId: npc.id,
+                        sceneLength: sceneText.length
+                    });
+
+                } catch (e) {
+                    console.error("Error saving scene:", e);
+                }
+            }
+            // Refocus input
+            setTimeout(() => {
+                messageInputRef.current?.focus();
+            }, 0);
+            return;
+        }
 
         stopAudio();
         setIsThinking(true);
@@ -1878,21 +1985,86 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
     };
 
 
+    // --- Starting Scene Logic ---
 
-    const handleSetScene = async (isHidden) => {
-        if (!sceneDescription.trim()) return;
+    const handleOpenSceneWizard = () => {
+        setIsSceneWizardOpen(true);
+        // Check cache first
+        if (sceneCache.current[npc.id]) {
+            setStartingSceneText(sceneCache.current[npc.id]);
+        } else if (!startingSceneText) {
+            handleGenerateStartingScene();
+        }
+    };
+
+    const handleCancelScene = () => {
+        setIsSceneWizardOpen(false);
+    };
+
+    /**
+     * Core generator function that returns the string.
+     * Does NOT update state directly (unless called by the initial loader).
+     */
+    const fetchStartingScene = async () => {
+        try {
+            return await generateStartingScene(npc.structuredData);
+        } catch (e) {
+            console.error("Error generating scene:", e);
+            throw e;
+        }
+    };
+
+    const handleGenerateStartingScene = async () => {
+        setIsGeneratingScene(true);
+        try {
+            const scene = await fetchStartingScene();
+            setStartingSceneText(scene);
+            // Update cache
+            sceneCache.current[npc.id] = scene;
+        } catch (e) {
+            // Error handling
+        } finally {
+            setIsGeneratingScene(false);
+        }
+    };
+
+    // Handler for regenerate scene button in header
+    const handleRegenerateSceneForField = async () => {
+        setIsGeneratingScene(true);
+        try {
+            const scene = await fetchStartingScene();
+            if (scene) {
+                setStartingSceneText(scene);
+                sceneCache.current[npc.id] = scene;
+            }
+        } catch (e) {
+            console.error("Error regenerating scene:", e);
+        } finally {
+            setIsGeneratingScene(false);
+        }
+    };
+
+    const handleSaveSceneEdit = (newText) => {
+        setStartingSceneText(newText);
+        // Update cache with manual edits
+        sceneCache.current[npc.id] = newText;
+    };
+
+
+    const handleStartWithScene = async () => {
+        if (!startingSceneText) return;
 
         const sceneMsg = {
             role: 'scene',
-            text: sceneDescription,
-            isHidden: isHidden,
+            text: startingSceneText,
             timestamp: new Date().toISOString()
         };
 
         const newHistory = [...chatHistory, sceneMsg];
         setChatHistory(newHistory);
-        setSceneDescription('');
+        setIsSceneWizardOpen(false);
 
+        // Update Firestore
         if (db) {
             try {
                 const npcRef = doc(db, npcCollectionPath(appId, userId), npc.id);
@@ -1903,6 +2075,44 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
             } catch (e) {
                 console.error("Error saving scene:", e);
             }
+        }
+
+        // Trigger initial NPC message
+        setIsThinking(true);
+        try {
+            // Use the existing getNPCResponse function to get a proper response
+            const npcResponseText = await getNPCResponse(npc.structuredData, newHistory);
+            const npcMsg = { 
+                role: 'npc', 
+                text: npcResponseText, 
+                timestamp: new Date().toISOString() 
+            };
+            const finalHistory = [...newHistory, npcMsg];
+
+            // Update state and Firestore
+            setChatHistory(finalHistory);
+            
+            if (db) {
+                try {
+                    const npcRef = doc(db, npcCollectionPath(appId, userId), npc.id);
+                    await updateDoc(npcRef, {
+                        chats: finalHistory,
+                        updatedAt: new Date().toISOString()
+                    });
+                } catch (e) {
+                    console.error("Error saving NPC response:", e);
+                }
+            }
+
+            // Auto-play if enabled
+            if (isAutoPlayEnabled) {
+                handleSpeakClick(npcResponseText, finalHistory.length - 1);
+            }
+
+        } catch (error) {
+            console.error("Error generating initial NPC response:", error);
+        } finally {
+            setIsThinking(false);
         }
     };
 
@@ -2064,54 +2274,6 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
                 )}
             </div>
 
-            {/* Scene Control Panel */}
-            <div className="mt-6 p-4 bg-indigo-50 rounded-xl shadow-inner border border-indigo-200">
-                <div className="flex items-center justify-between mb-3">
-                    <h4 className="flex items-center text-lg font-bold text-indigo-700">
-                        <Zap className="w-5 h-5 mr-2" />
-                        Scene Control
-                    </h4>
-                    <button
-                        onClick={() => setShowHiddenScenes(!showHiddenScenes)}
-                        className={`p-1.5 rounded-lg transition-colors flex items-center space-x-1 text-xs font-medium ${showHiddenScenes ? 'bg-indigo-100 text-indigo-700' : 'bg-gray-200 text-gray-500'}`}
-                        title={showHiddenScenes ? "Hidden scenes are visible to you" : "Hidden scenes are hidden from you"}
-                    >
-                        {showHiddenScenes ? <Eye className="w-4 h-4 mr-1" /> : <EyeOff className="w-4 h-4 mr-1" />}
-                        <span>{showHiddenScenes ? 'Show Hidden' : 'Hide Hidden'}</span>
-                    </button>
-                </div>
-                <div className="space-y-3">
-                    <textarea
-                        value={sceneDescription}
-                        onChange={(e) => setSceneDescription(e.target.value)}
-                        placeholder="Describe the setting or scene change..."
-
-                        className="w-full p-2 text-sm border border-indigo-200 rounded-lg focus:ring-indigo-500 focus:border-indigo-500 resize-none"
-                        rows={3}
-                        maxLength={1000}
-                    />
-                    <div className="flex items-center justify-between gap-3">
-                        <Button
-                            onClick={() => handleSetScene(false)}
-                            disabled={!sceneDescription.trim()}
-                            icon={Zap}
-                            variant="custom"
-                            className="flex-1 px-3 py-2 text-xs bg-white text-indigo-700 border border-indigo-200 hover:bg-indigo-50 shadow-sm"
-                        >
-                            Set Scene
-                        </Button>
-                        <Button
-                            onClick={() => handleSetScene(true)}
-                            disabled={!sceneDescription.trim()}
-                            icon={EyeOff}
-                            variant="custom"
-                            className="flex-1 px-3 py-2 text-xs bg-white text-red-700 border border-red-200 hover:bg-red-50 shadow-sm"
-                        >
-                            Set Secret Scene
-                        </Button>
-                    </div>
-                </div>
-            </div>
 
             <p className="mt-4 text-xs font-mono text-gray-400">ID: {npc.id.substring(0, 8)}...</p>
         </div>
@@ -2154,23 +2316,118 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
             {/* Chat History Container - Scrollable */}
             <div id="chat-container" className="flex-1 p-6 space-y-4 overflow-y-auto bg-gray-50">
                 {chatHistory.length === 0 ? (
-                    <div className="flex items-center justify-center h-full text-center text-gray-400">
-                        <div>
-                            <MessageSquare className="w-12 h-12 mx-auto mb-3 text-gray-300" />
-                            <p>Start the conversation with {npc.name}!</p>
-                            <p className="mt-2 text-sm">Click the <Volume2 className="w-4 h-4 inline-block" /> icon to hear their voice.</p>
-                        </div>
+                    <div 
+                        className="flex flex-col items-center justify-center h-full p-8 text-center space-y-6 animate-fade-in relative"
+                        style={{overflow: 'visible'}}
+                    >
+                        {/* 
+                            Logic:
+                            1. If NOT wizard open -> Show "Ready to Chat" + "Set a Scene" button.
+                            2. If wizard OPEN -> Show Scene Card (Loading or Text).
+                        */}
+
+                        {!isSceneWizardOpen ? (
+                            <div 
+                                className='animate-fade-in flex flex-col items-center'
+                                style={{width: '571px', minWidth: '571px', maxWidth: '100vw'}}
+                            >
+                                <MessageSquare className="w-16 h-16 mx-auto mb-4 text-gray-200" />
+                                <h3 className="text-xl font-bold text-gray-400 mb-2">Ready to Chat</h3>
+                                <p className="text-gray-400 mb-6">Start the conversation with {npc.name}!</p>
+
+                                <button
+                                    onClick={handleOpenSceneWizard}
+                                    className="flex items-center px-4 py-2 bg-indigo-50 text-indigo-600 rounded-full hover:bg-indigo-100 transition-colors font-medium border border-indigo-200 shadow-sm"
+                                >
+                                    <Sparkles className="w-4 h-4 mr-2" />
+                                    Set a Scene
+                                </button>
+
+                                <p className="mt-6 text-sm text-gray-400 bg-gray-100 py-1 px-3 rounded-full inline-block">
+                                    Tip: Type <code className="text-indigo-500 font-bold">/scene</code> to set a scene at any time.
+                                </p>
+                            </div>
+                        ) : (
+                            // --- SCENE WIZARD / PREVIEW ---
+                            <div 
+                                className="w-full max-w-lg bg-white rounded-xl shadow-2xl border-2 border-indigo-100 overflow-hidden relative animate-in fade-in zoom-in-95 duration-200"
+                                style={{width: '571px', minWidth: '571px', maxWidth: '100vw'}}
+                            >
+
+                                {isGeneratingScene ? (
+                                    <div className="p-12 flex flex-col items-center text-indigo-600">
+                                        <Wand2 className="w-12 h-12 mb-4 animate-magic" />
+                                        <h3 className="text-xl font-bold">Setting the Scene...</h3>
+                                        <p className="text-sm text-indigo-400">Consulting the Dungeon Master...</p>
+                                    </div>
+                                ) : (
+                                    <>
+                                        <div className="bg-indigo-50 p-4 border-b border-indigo-100 flex items-center justify-between">
+                                            <h3 className="font-bold text-indigo-800 flex items-center">
+                                                <Sparkles className="w-4 h-4 mr-2 text-indigo-500" />
+                                                Starting Scene
+                                            </h3>
+                                            <div className="flex items-center gap-2">
+                                                {!isEditingSceneField && (
+                                                    <>
+                                                        <button
+                                                            onClick={handleRegenerateSceneForField}
+                                                            className="p-1.5 text-purple-600 hover:bg-purple-100 rounded-lg transition-colors"
+                                                            title="Regenerate Scene"
+                                                        >
+                                                            <Wand2 className="w-4 h-4" />
+                                                        </button>
+                                                        <button
+                                                            onClick={handleCancelScene}
+                                                            className="p-1.5 text-gray-500 hover:bg-gray-200 rounded-lg transition-colors"
+                                                            title="Close"
+                                                        >
+                                                            <X className="w-4 h-4" />
+                                                        </button>
+                                                    </>
+                                                )}
+                                            </div>
+                                        </div>
+
+                                        <div className="p-4 text-left">
+                                            <EditableField
+                                                label="Scene Description"
+                                                value={startingSceneText}
+                                                onSave={handleSaveSceneEdit}
+                                                type="textarea"
+                                                hideLabel={true}
+                                                textClassName="min-h-[150px]"
+                                                rows={10}
+                                                stayInModeAfterRegenerate={true}
+                                                onEditStateChange={setIsEditingSceneField}
+                                            />
+                                        </div>
+
+                                        {!isEditingSceneField && (
+                                            <div className="p-4 bg-gray-50 border-t border-gray-100 flex justify-end items-center gap-4">
+                                                <button
+                                                    onClick={handleCancelScene}
+                                                    className="text-sm text-gray-500 hover:text-gray-700 px-4 py-2 hover:bg-gray-100 rounded-lg transition-colors font-semibold"
+                                                >
+                                                    Cancel
+                                                </button>
+                                                <button
+                                                    onClick={handleStartWithScene}
+                                                    disabled={!startingSceneText}
+                                                    className="bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-3 rounded-lg shadow-md hover:shadow-lg transition-all transform active:scale-95 font-bold flex items-center justify-center"
+                                                >
+                                                    <Zap className="w-5 h-5 mr-2 fill-current" />
+                                                    Start Scene
+                                                </button>
+                                            </div>
+                                        )}
+                                    </>
+                                )}
+                            </div>
+                        )}
                     </div>
                 ) : (
                     chatHistory
-                        .filter(msg => {
-                            // Filter logic:
-                            // If it's a scene AND it's hidden AND showHiddenScenes is false -> Hide it
-                            if (msg.role === 'scene' && msg.isHidden && !showHiddenScenes) {
-                                return false;
-                            }
-                            return true;
-                        })
                         .map((msg, index) => (
                             <ChatBubble
                                 key={index}
@@ -2293,21 +2550,99 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
                         {/* Chat History Container - Scrollable */}
                         <div id="chat-container" className="h-full p-6 space-y-4 overflow-y-auto bg-gray-50">
                             {chatHistory.length === 0 ? (
-                                <div className="flex items-center justify-center h-full text-center text-gray-400">
-                                    <div>
-                                        <MessageSquare className="w-12 h-12 mx-auto mb-3 text-gray-300" />
-                                        <p>Start the conversation with {npc.name}!</p>
-                                        <p className="mt-2 text-sm">Click the <Volume2 className="w-4 h-4 inline-block" /> icon to hear their voice.</p>
-                                    </div>
+                                <div 
+                                    className="flex flex-col items-center justify-center h-full p-8 text-center space-y-6 animate-fade-in"
+                                    style={{overflow: 'visible'}}
+                                >
+                                    {isGeneratingScene ? (
+                                        <div className="flex flex-col items-center text-indigo-600">
+                                            <Wand2 className="w-12 h-12 mb-4 animate-magic" />
+                                            <h3 className="text-xl font-bold">Setting the Scene...</h3>
+                                            <p className="text-sm text-indigo-400">Consulting the Dungeon Master...</p>
+                                        </div>
+                                    ) : startingSceneText && !sceneSkipped ? (
+                                        <div 
+                                            className="bg-white rounded-xl shadow-lg border-2 border-indigo-100 overflow-hidden"
+                                            style={{width: '571px', minWidth: '571px', maxWidth: '100vw'}}
+                                        >
+                                            <div className="bg-indigo-50 p-4 border-b border-indigo-100 flex items-center justify-between">
+                                                <h3 className="font-bold text-indigo-800 flex items-center">
+                                                    <Sparkles className="w-4 h-4 mr-2 text-indigo-500" />
+                                                    Starting Scene
+                                                </h3>
+                                                <div className="flex space-x-2">
+                                                    {!isEditingScene ? (
+                                                        <button
+                                                            onClick={() => setIsEditingScene(true)}
+                                                            className="p-1.5 text-indigo-600 hover:bg-indigo-100 rounded-lg transition-colors"
+                                                            title="Edit Scene"
+                                                        >
+                                                            <Edit2 className="w-4 h-4" />
+                                                        </button>
+                                                    ) : (
+                                                        <button
+                                                            onClick={() => setIsEditingScene(false)}
+                                                            className="p-1.5 text-green-600 hover:bg-green-100 rounded-lg transition-colors"
+                                                            title="Save Edits"
+                                                        >
+                                                            <Check className="w-4 h-4" />
+                                                        </button>
+                                                    )}
+                                                    <button
+                                                        onClick={handleGenerateStartingScene}
+                                                        className="p-1.5 text-indigo-600 hover:bg-indigo-100 rounded-lg transition-colors"
+                                                        title="Regenerate Scene"
+                                                    >
+                                                        <RefreshCw className="w-4 h-4" />
+                                                    </button>
+                                                </div>
+                                            </div>
+                                            <div className="p-6 text-left">
+                                                {isEditingScene ? (
+                                                    <textarea
+                                                        value={startingSceneText}
+                                                        onChange={(e) => setStartingSceneText(e.target.value)}
+                                                        className="w-full h-48 p-3 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                                                    />
+                                                ) : (
+                                                    <div className="prose prose-sm max-w-none text-gray-700 whitespace-pre-wrap font-medium">
+                                                        {startingSceneText}
+                                                    </div>
+                                                )}
+                                            </div>
+                                            <div className="p-4 bg-gray-50 border-t border-gray-100 flex justify-between items-center gap-4">
+                                                <button
+                                                    onClick={handleSkipScene}
+                                                    className="text-sm text-gray-500 hover:text-gray-700 px-4 py-2 hover:bg-gray-100 rounded-lg transition-colors uppercase tracking-wide font-semibold"
+                                                >
+                                                    Skip Setup
+                                                </button>
+                                                <button
+                                                    onClick={handleStartWithScene}
+                                                    disabled={isEditingScene}
+                                                    className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-3 rounded-lg shadow-md hover:shadow-lg transition-all transform active:scale-95 font-bold flex items-center justify-center"
+                                                >
+                                                    <Zap className="w-5 h-5 mr-2 fill-current" />
+                                                    Start Scene
+                                                </button>
+                                            </div>
+                                        </div>
+                                    ) : (
+                                        <div 
+                                            className='animate-fade-in flex flex-col items-center'
+                                            style={{width: '571px', minWidth: '571px', maxWidth: '100vw'}}
+                                        >
+                                            <MessageSquare className="w-16 h-16 mx-auto mb-4 text-gray-200" />
+                                            <h3 className="text-xl font-bold text-gray-400 mb-2">Ready to Chat</h3>
+                                            <p className="text-gray-400 mb-6">Start the conversation with {npc.name}!</p>
+                                            <p className="text-sm text-gray-400 bg-gray-100 py-1 px-3 rounded-full inline-block">
+                                                Tip: Type <code className="text-indigo-500 font-bold">/scene</code> to set a scene at any time.
+                                            </p>
+                                        </div>
+                                    )}
                                 </div>
                             ) : (
                                 chatHistory
-                                    .filter(msg => {
-                                        if (msg.role === 'scene' && msg.isHidden && !showHiddenScenes) {
-                                            return false;
-                                        }
-                                        return true;
-                                    })
                                     .map((msg, index) => (
                                         <ChatBubble
                                             key={index}
@@ -2343,7 +2678,7 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
                             />
                             <Button
                                 onClick={handleSend}
-                                disabled={!message.trim() || isThinking}
+                                disabled={!message.trim() || isThinking || (chatHistory.length === 0 && isSceneWizardOpen)}
                                 loading={isThinking}
                                 className="h-12 w-12 p-0 flex-shrink-0 rounded-xl"
                             >
