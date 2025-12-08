@@ -1590,7 +1590,12 @@ const ChatBubble = ({ message, npcName, isSpeaking, onSpeakClick, onSetNextScene
                                 onClick={onSetNextScene}
                                 className="flex items-center px-6 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg shadow-md hover:shadow-lg transition-all transform active:scale-95 font-semibold"
                             >
-                                <Sparkles className="w-4 h-4 mr-2" />
+                                <style>{magicalStyles}</style>
+                                <div className="relative mr-2">
+                                    <Wand2 className="w-5 h-5 animate-magic" />
+                                    <Sparkles className="w-3 h-3 text-yellow-400 absolute -top-1 -right-1 animate-sparkle-1" />
+                                    <Sparkles className="w-3 h-3 text-cyan-400 absolute -bottom-1 -left-1 animate-sparkle-2" />
+                                </div>
                                 Set Next Scene!
                             </button>
                         </div>
@@ -2762,7 +2767,12 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
                                     onClick={handleOpenSceneWizard}
                                     className="flex items-center px-4 py-2 bg-indigo-50 text-indigo-600 rounded-full hover:bg-indigo-100 transition-colors font-medium border border-indigo-200 shadow-sm"
                                 >
-                                    <Sparkles className="w-4 h-4 mr-2" />
+                                    <style>{magicalStyles}</style>
+                                    <div className="relative mr-2">
+                                        <Wand2 className="w-4 h-4 animate-magic" />
+                                        <Sparkles className="w-2 h-2 text-yellow-400 absolute -top-0.5 -right-0.5 animate-sparkle-1" />
+                                        <Sparkles className="w-2 h-2 text-cyan-400 absolute -bottom-0.5 -left-0.5 animate-sparkle-2" />
+                                    </div>
                                     Set a Scene
                                 </button>
 
@@ -2774,7 +2784,7 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
                             // --- SCENE WIZARD / PREVIEW ---
                             <div 
                                 className="w-full max-w-lg bg-white rounded-xl shadow-2xl border-2 border-indigo-100 overflow-hidden relative animate-in fade-in zoom-in-95 duration-200"
-                                style={{width: '571px', minWidth: '571px', maxWidth: '100vw'}}
+                                style={{width: '571px', minWidth: '571px', maxWidth: '90vw'}}
                             >
 
                                 {isGeneratingScene ? (
@@ -3008,7 +3018,7 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
                                     ) : startingSceneText && !sceneSkipped ? (
                                         <div 
                                             className="bg-white rounded-xl shadow-lg border-2 border-indigo-100 overflow-hidden"
-                                            style={{width: '571px', minWidth: '571px', maxWidth: '100vw'}}
+                                            style={{width: '571px', minWidth: '571px', maxWidth: '90vw'}}
                                         >
                                             <div className="bg-indigo-50 p-4 border-b border-indigo-100 flex items-center justify-between">
                                                 <h3 className="font-bold text-indigo-800 flex items-center">
