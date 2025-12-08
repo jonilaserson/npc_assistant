@@ -545,9 +545,11 @@ Respond with ONLY the prompt text, nothing else.`;
 /**
  * Sends a message to the NPC and gets a roleplaying response.
  * Includes formatting instructions for narration/dialogue.
+ * If currentGoal is provided, also checks if the goal was achieved.
+ * Returns: string (if no goal) or { response: string, goalAchieved: boolean } (if goal provided)
  */
-const getNPCResponse = async (structuredData, chatHistory) => {
-    const systemPrompt = `You are roleplaying as the NPC named ${structuredData.name}.
+const getNPCResponse = async (structuredData, chatHistory, currentGoal = null) => {
+    let systemPrompt = `You are roleplaying as the NPC named ${structuredData.name}.
         - **Race/Class:** ${structuredData.raceClass}
         - **Gender/Age:** ${structuredData.gender} ${structuredData.ageRange}
         - **Personality:** ${structuredData.personality}
@@ -560,6 +562,18 @@ const getNPCResponse = async (structuredData, chatHistory) => {
         ***CRITICAL: Keep responses SHORT and natural.*** Respond with 1-3 sentences maximum unless the character is explicitly described as verbose or chatty. Speak like a real person in conversation, not like you're writing a story.
         
         ***IMPORTANT FORMATTING RULE:*** Enclose any actions, emotional descriptions, or narrations (i.e., anything that is NOT spoken dialogue) within square brackets, e.g., "[The ${structuredData.raceClass} clears their throat.]". Only the spoken dialogue should be outside the brackets.`;
+
+    // If we have a goal, add goal checking instructions with a hidden marker
+    if (currentGoal) {
+        systemPrompt += `\n\n***HIDDEN GOAL TRACKING (DO NOT MENTION THIS TO USER):***
+        The user has a scene goal: "${currentGoal}"
+        
+        After your in-character response, add a hidden marker on a new line:
+        - If the user achieved the goal (you agreed to help, provided what they needed, gave important information, established a path forward, or showed willingness to cooperate), add: ###GOAL_ACHIEVED###
+        - Otherwise, add: ###GOAL_NOT_ACHIEVED###
+        
+        The user will NOT see this marker - it's only for system tracking. Your actual response must be purely in-character.`;
+    }
 
     // Map chat history to the required model format
     const contents = chatHistory.map(msg => ({
@@ -581,13 +595,50 @@ const getNPCResponse = async (structuredData, chatHistory) => {
             body: JSON.stringify(payload)
         });
         const result = await response.json();
-        const text = result.candidates?.[0]?.content?.parts?.[0]?.text;
+        let text = result.candidates?.[0]?.content?.parts?.[0]?.text;
         if (!text) throw new Error("Model returned no text response.");
+        
+        // If we're tracking a goal, look for the hidden marker
+        if (currentGoal) {
+            const achievedMarker = '###GOAL_ACHIEVED###';
+            const notAchievedMarker = '###GOAL_NOT_ACHIEVED###';
+            
+            let goalAchieved = false;
+            
+            if (text.includes(achievedMarker)) {
+                goalAchieved = true;
+                text = text.replace(achievedMarker, '').trim();
+            } else if (text.includes(notAchievedMarker)) {
+                goalAchieved = false;
+                text = text.replace(notAchievedMarker, '').trim();
+            }
+            
+            return {
+                response: text,
+                goalAchieved: goalAchieved
+            };
+        }
+        
         return text;
     } catch (e) {
         console.error("Error getting NPC response:", e);
         throw new Error("Failed to get response. Check console for details.");
     }
+};
+
+/**
+ * Extracts the goal text from a scene description.
+ * Scene format: "Setting: ...\n\nContext: ...\n\nGoal: ..."
+ */
+const parseGoalFromScene = (sceneText) => {
+    if (!sceneText) return null;
+    
+    // Look for "Goal:" followed by the goal text
+    const goalMatch = sceneText.match(/Goal:\s*(.+?)(?:\n\n|\n|$)/i);
+    if (goalMatch && goalMatch[1]) {
+        return goalMatch[1].trim();
+    }
+    return null;
 };
 
 /**
@@ -1490,9 +1541,10 @@ const NpcCreation = ({ db, userId, onNpcCreated }) => {
 
 // --- Chat Interface Components ---
 
-const ChatBubble = ({ message, npcName, isSpeaking, onSpeakClick }) => {
+const ChatBubble = ({ message, npcName, isSpeaking, onSpeakClick, onSetNextScene, onRollbackToScene, showGoalButtons }) => {
     const isNpc = message.role === 'npc';
     const isScene = message.role === 'scene';
+    const isGoalAchieved = message.role === 'goal_achieved';
 
     // Function to extract only the dialogue for display/TTS purposes
     const getDialogueText = (text) => text.replace(/ *\[[\s\S]*?\] */g, '').trim();
@@ -1500,11 +1552,52 @@ const ChatBubble = ({ message, npcName, isSpeaking, onSpeakClick }) => {
     if (isScene) {
         return (
             <div className="flex w-full justify-center my-4">
-                <div className="w-[80%] max-w-lg p-4 rounded-lg shadow-sm text-left border-2 bg-indigo-50 border-indigo-500">
+                <div className="w-[80%] max-w-lg p-4 rounded-lg shadow-sm text-left border-2 bg-indigo-50 border-indigo-500 relative">
                     <p className="text-xs font-bold uppercase tracking-wider mb-1 opacity-70 text-indigo-700">
                         Scene
                     </p>
                     <p className="font-mono text-sm italic text-gray-900 whitespace-pre-wrap">{message.text}</p>
+                    <button
+                        onClick={onRollbackToScene}
+                        className="absolute bottom-2 right-2 p-1.5 text-indigo-400 hover:text-indigo-600 hover:bg-indigo-100 rounded-full transition-colors"
+                        title="Rollback to this scene"
+                    >
+                        <RotateCcw className="w-4 h-4" />
+                    </button>
+                </div>
+            </div>
+        );
+    }
+
+    if (isGoalAchieved) {
+        return (
+            <div className="flex w-full justify-center my-4">
+                <div className="w-[80%] max-w-lg p-6 rounded-lg shadow-lg text-center border-2 bg-gradient-to-br from-yellow-50 to-amber-50 border-yellow-400 animate-in fade-in zoom-in-95 duration-300">
+                    <div className="flex items-center justify-center mb-3">
+                        <div className="w-12 h-12 rounded-full bg-yellow-400 flex items-center justify-center animate-bounce">
+                            <span className="text-2xl">🎉</span>
+                        </div>
+                    </div>
+                    <p className="text-lg font-bold text-yellow-800 mb-2">
+                        Scene Goal Achieved!
+                    </p>
+                    <p className="text-sm text-gray-700 mb-4">
+                        "{message.text}"
+                    </p>
+                    {showGoalButtons && (
+                        <div className="flex justify-center mb-3">
+                            <button
+                                onClick={onSetNextScene}
+                                className="flex items-center px-6 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg shadow-md hover:shadow-lg transition-all transform active:scale-95 font-semibold"
+                            >
+                                <Sparkles className="w-4 h-4 mr-2" />
+                                Set Next Scene!
+                            </button>
+                        </div>
+                    )}
+                    <p className="text-xs text-gray-600 bg-white bg-opacity-60 py-1 px-3 rounded-full inline-block">
+                        Tip: you can always type <code className="text-indigo-600 font-bold">/scene</code> to switch to a new scene
+                    </p>
                 </div>
             </div>
         );
@@ -1729,6 +1822,10 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
     const [isSceneWizardOpen, setIsSceneWizardOpen] = useState(false);
     const [isEditingSceneField, setIsEditingSceneField] = useState(false);
 
+    // Goal Tracking State
+    const [currentSceneGoal, setCurrentSceneGoal] = useState(null);
+    const [goalAchievedForScene, setGoalAchievedForScene] = useState(null); // Stores the scene index for which goal was achieved
+
     // Cache for generated scenes: { [npcId]: "scene text" }
     const sceneCache = useRef({});
 
@@ -1744,7 +1841,44 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
         setIsGeneratingScene(false);
         setIsEditingSceneField(false);
 
-        setChatHistory(npc.chats || []);
+        const chats = npc.chats || [];
+        setChatHistory(chats);
+        
+        // Parse and restore current goal from chat history
+        if (chats.length > 0) {
+            // Find the most recent scene
+            let mostRecentSceneIndex = -1;
+            let mostRecentSceneText = null;
+            for (let i = chats.length - 1; i >= 0; i--) {
+                if (chats[i].role === 'scene') {
+                    mostRecentSceneIndex = i;
+                    mostRecentSceneText = chats[i].text;
+                    break;
+                }
+            }
+            
+            if (mostRecentSceneText) {
+                // Check if goal was already achieved (look for goal_achieved message after this scene)
+                let goalAlreadyAchieved = false;
+                for (let i = mostRecentSceneIndex + 1; i < chats.length; i++) {
+                    if (chats[i].role === 'goal_achieved') {
+                        goalAlreadyAchieved = true;
+                        setGoalAchievedForScene(mostRecentSceneIndex);
+                        break;
+                    }
+                }
+                
+                // If goal not achieved yet, parse and set current goal
+                if (!goalAlreadyAchieved) {
+                    const goal = parseGoalFromScene(mostRecentSceneText);
+                    if (goal) {
+                        setCurrentSceneGoal(goal);
+                        setGoalAchievedForScene(null);
+                    }
+                }
+            }
+        }
+        
         // Load the saved Cloudinary image URL if it exists
         setCurrentImageUrl(npc.imageUrl || null);
 
@@ -1798,6 +1932,39 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
             // The unmount cleanup is handled in the effect where audioPlayer is created.
         };
     }, [stopAudio]);
+
+    // Play success sound when goal is achieved
+    const playSuccessSound = () => {
+        try {
+            // Create a simple "pa-pam!" sound using Web Audio API
+            const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            
+            // First note "pa" (higher pitch)
+            const oscillator1 = audioContext.createOscillator();
+            const gainNode1 = audioContext.createGain();
+            oscillator1.connect(gainNode1);
+            gainNode1.connect(audioContext.destination);
+            oscillator1.frequency.value = 523.25; // C5
+            gainNode1.gain.setValueAtTime(0.3, audioContext.currentTime);
+            gainNode1.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.2);
+            oscillator1.start(audioContext.currentTime);
+            oscillator1.stop(audioContext.currentTime + 0.2);
+            
+            // Second note "pam" (lower pitch, slightly delayed)
+            const oscillator2 = audioContext.createOscillator();
+            const gainNode2 = audioContext.createGain();
+            oscillator2.connect(gainNode2);
+            gainNode2.connect(audioContext.destination);
+            oscillator2.frequency.value = 392.00; // G4
+            gainNode2.gain.setValueAtTime(0, audioContext.currentTime + 0.15);
+            gainNode2.gain.setValueAtTime(0.3, audioContext.currentTime + 0.15);
+            gainNode2.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.5);
+            oscillator2.start(audioContext.currentTime + 0.15);
+            oscillator2.stop(audioContext.currentTime + 0.5);
+        } catch (e) {
+            console.error("Error playing success sound:", e);
+        }
+    };
 
     const handleSpeakClick = async (text, index) => {
         // If speaking THIS message, clicking the button should stop it immediately.
@@ -1907,6 +2074,17 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
             const sceneMsg = { role: 'scene', text: sceneText, timestamp: new Date().toISOString() };
             const newHistory = [...chatHistory, sceneMsg];
 
+            // Parse and store the goal from this scene
+            const goal = parseGoalFromScene(sceneText);
+            if (goal) {
+                setCurrentSceneGoal(goal);
+                setGoalAchievedForScene(null); // Reset achievement status for new scene
+            }
+
+            // Clear scene cache after adding scene to conversation
+            delete sceneCache.current[npc.id];
+            setStartingSceneText('');
+
             setChatHistory(newHistory);
             scrollToBottom('chat-container');
 
@@ -1947,12 +2125,57 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
         scrollToBottom('chat-container');
 
         try {
-            // 2. Get NPC response (text only)
-            const npcResponseText = await getNPCResponse(npc.structuredData, newHistory);
+            // 2. Get NPC response (and check goal if we have one)
+            const shouldCheckGoal = currentSceneGoal && goalAchievedForScene === null;
+            const npcResponse = await getNPCResponse(
+                npc.structuredData, 
+                newHistory, 
+                shouldCheckGoal ? currentSceneGoal : null
+            );
+            
+            // Handle response format (string or object with goalAchieved)
+            let npcResponseText;
+            let isGoalAchieved = false;
+            
+            if (typeof npcResponse === 'string') {
+                npcResponseText = npcResponse;
+            } else {
+                npcResponseText = npcResponse.response;
+                isGoalAchieved = npcResponse.goalAchieved;
+            }
+            
             const npcMsg = { role: 'npc', text: npcResponseText, timestamp: new Date().toISOString() };
-            const finalHistory = [...newHistory, npcMsg];
+            let finalHistory = [...newHistory, npcMsg];
 
-            // 3. Update Firestore with the full final history
+            // 3. If goal was achieved, add achievement message
+            if (isGoalAchieved && shouldCheckGoal) {
+                // Find the index of the most recent scene to mark it as achieved
+                let mostRecentSceneIndex = -1;
+                for (let i = finalHistory.length - 1; i >= 0; i--) {
+                    if (finalHistory[i].role === 'scene') {
+                        mostRecentSceneIndex = i;
+                        break;
+                    }
+                }
+                
+                // Add goal achievement message
+                const goalAchievedMsg = {
+                    role: 'goal_achieved',
+                    text: currentSceneGoal,
+                    timestamp: new Date().toISOString()
+                };
+                finalHistory = [...finalHistory, goalAchievedMsg];
+                setGoalAchievedForScene(mostRecentSceneIndex);
+                
+                // Clear scene cache so next scene will be freshly generated
+                delete sceneCache.current[npc.id];
+                setStartingSceneText('');
+                
+                // Play success sound
+                playSuccessSound();
+            }
+
+            // 4. Update Firestore with the full final history
             const npcRef = doc(db, npcCollectionPath(appId, userId), npc.id);
             await updateDoc(npcRef, {
                 chats: finalHistory,
@@ -1968,10 +2191,13 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
                 messageCount: finalHistory.length
             });
 
-            // 4. Auto-play if enabled
+            // 5. Auto-play if enabled
             if (isAutoPlayEnabled) {
-                // The new message is at the end of finalHistory
-                handleSpeakClick(npcResponseText, finalHistory.length - 1);
+                // The new message is at the end of finalHistory (or second to last if goal achieved)
+                const npcMessageIndex = finalHistory[finalHistory.length - 1].role === 'goal_achieved' 
+                    ? finalHistory.length - 2 
+                    : finalHistory.length - 1;
+                handleSpeakClick(npcResponseText, npcMessageIndex);
             }
 
         } catch (e) {
@@ -1990,16 +2216,59 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
         }
     };
 
+    const handleRollbackToScene = async (sceneIndex) => {
+        const scene = chatHistory[sceneIndex];
+        if (!scene || scene.role !== 'scene') return;
+
+        if (!confirm("Rollback to this scene? This will clear all conversation from this point forward.")) return;
+
+        try {
+            // Save the scene to cache
+            sceneCache.current[npc.id] = scene.text;
+            setStartingSceneText(scene.text);
+
+            // Clear conversation from this scene forward (including the scene itself)
+            const newHistory = chatHistory.slice(0, sceneIndex);
+
+            // Update Firestore
+            const npcRef = doc(db, npcCollectionPath(appId, userId), npc.id);
+            await updateDoc(npcRef, {
+                chats: newHistory,
+                updatedAt: new Date().toISOString()
+            });
+            setChatHistory(newHistory);
+
+            // Reset goal tracking state
+            setCurrentSceneGoal(null);
+            setGoalAchievedForScene(null);
+
+            // Open scene wizard with the cached scene
+            setIsSceneWizardOpen(true);
+        } catch (e) {
+            console.error("Error rolling back to scene:", e);
+        }
+    };
+
     const handleResetConversation = async () => {
         if (!confirm("Are you sure you want to clear the conversation history? This cannot be undone.")) return;
 
         try {
+            // Save the first scene to cache if it exists
+            if (chatHistory.length > 0 && chatHistory[0].role === 'scene') {
+                sceneCache.current[npc.id] = chatHistory[0].text;
+                setStartingSceneText(chatHistory[0].text);
+            }
+
             const npcRef = doc(db, npcCollectionPath(appId, userId), npc.id);
             await updateDoc(npcRef, {
                 chats: [],
                 updatedAt: new Date().toISOString()
             });
             setChatHistory([]);
+            
+            // Reset goal tracking state
+            setCurrentSceneGoal(null);
+            setGoalAchievedForScene(null);
         } catch (e) {
             console.error("Error resetting conversation:", e);
         }
@@ -2203,9 +2472,20 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
             timestamp: new Date().toISOString()
         };
 
+        // Parse and store the goal from this scene
+        const goal = parseGoalFromScene(startingSceneText);
+        if (goal) {
+            setCurrentSceneGoal(goal);
+            setGoalAchievedForScene(null); // Reset achievement status for new scene
+        }
+
         const newHistory = [...chatHistory, sceneMsg];
         setChatHistory(newHistory);
         setIsSceneWizardOpen(false);
+
+        // Clear scene cache after adding scene to conversation
+        delete sceneCache.current[npc.id];
+        setStartingSceneText('');
 
         // Update Firestore
         if (db) {
@@ -2571,15 +2851,24 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
                     </div>
                 ) : (
                     chatHistory
-                        .map((msg, index) => (
-                            <ChatBubble
-                                key={index}
-                                message={msg}
-                                npcName={npc.name}
-                                isSpeaking={playingMessageIndex === index}
-                                onSpeakClick={() => handleSpeakClick(msg.text, index)}
-                            />
-                        ))
+                        .map((msg, index) => {
+                            // Check if this is a goal_achieved message and if there's a scene after it
+                            const showGoalButtons = msg.role === 'goal_achieved' && 
+                                !chatHistory.slice(index + 1).some(m => m.role === 'scene');
+                            
+                            return (
+                                <ChatBubble
+                                    key={index}
+                                    message={msg}
+                                    npcName={npc.name}
+                                    isSpeaking={playingMessageIndex === index}
+                                    onSpeakClick={() => handleSpeakClick(msg.text, index)}
+                                    onSetNextScene={handleOpenSceneWizard}
+                                    onRollbackToScene={() => handleRollbackToScene(index)}
+                                    showGoalButtons={showGoalButtons}
+                                />
+                            );
+                        })
                 )}
                 {isThinking && (
                     <div className="flex justify-start">
@@ -2799,15 +3088,24 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
                                 </div>
                             ) : (
                                 chatHistory
-                                    .map((msg, index) => (
-                                        <ChatBubble
-                                            key={index}
-                                            message={msg}
-                                            npcName={npc.name}
-                                            isSpeaking={playingMessageIndex === index}
-                                            onSpeakClick={() => handleSpeakClick(msg.text, index)}
-                                        />
-                                    ))
+                                    .map((msg, index) => {
+                                        // Check if this is a goal_achieved message and if there's a scene after it
+                                        const showGoalButtons = msg.role === 'goal_achieved' && 
+                                            !chatHistory.slice(index + 1).some(m => m.role === 'scene');
+                                        
+                                        return (
+                                            <ChatBubble
+                                                key={index}
+                                                message={msg}
+                                                npcName={npc.name}
+                                                isSpeaking={playingMessageIndex === index}
+                                                onSpeakClick={() => handleSpeakClick(msg.text, index)}
+                                                onSetNextScene={handleOpenSceneWizard}
+                                                onRollbackToScene={() => handleRollbackToScene(index)}
+                                                showGoalButtons={showGoalButtons}
+                                            />
+                                        );
+                                    })
                             )}
                             {isThinking && (
                                 <div className="flex justify-start">
