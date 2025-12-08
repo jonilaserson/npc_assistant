@@ -3,7 +3,7 @@ import { onAuthStateChanged, signInAnonymously, signInWithCustomToken } from 'fi
 import { collection, deleteDoc, doc, onSnapshot, orderBy, query, setDoc, updateDoc } from 'firebase/firestore';
 import { getDownloadURL, ref, uploadString } from 'firebase/storage';
 import { auth, db, storage } from './firebaseConfig';
-import { Loader2, Zap, Brain, Wand2, MessageSquare, List, Send, Volume2, VolumeX, User, ChevronsDown, ChevronsUp, RefreshCw, Trash2, X, ChevronLeft, ChevronRight, Plus, GripVertical, Check, RotateCcw, Edit2, Eye, EyeOff, Sparkles, Maximize2 } from 'lucide-react';
+import { Loader2, Zap, Brain, Wand2, MessageSquare, List, Send, Volume2, VolumeX, User, ChevronsDown, ChevronsUp, RefreshCw, Trash2, X, ChevronLeft, ChevronRight, Plus, GripVertical, Check, RotateCcw, Edit2, Eye, EyeOff, Sparkles, Maximize2, Play } from 'lucide-react';
 import { FeedbackButton } from './components/FeedbackButton';
 import { logUsage } from './analytics';
 import * as Sentry from "@sentry/react";
@@ -352,32 +352,65 @@ const generateStructuredNPC = async (description) => {
 };
 
 /**
- * Generates a starting scene description, context, and goal for a new conversation.
+ * Generates a scene description, context, and goal.
+ * If conversationHistory is provided, the scene will build on the conversation.
  */
-const generateStartingScene = async (npcData) => {
-    const systemPrompt = `You are a creative Dungeon Master helper. Your task is to generate a concise starting scene for a roleplay conversation with the following NPC.
+const generateScene = async (npcData, conversationHistory = null) => {
+    // Build conversation history section if available
+    let conversationSection = '';
+    if (conversationHistory && conversationHistory.length > 0) {
+        // Find the most recent scene
+        let previousSceneText = '';
+        for (let i = conversationHistory.length - 1; i >= 0; i--) {
+            if (conversationHistory[i].role === 'scene') {
+                previousSceneText = conversationHistory[i].text;
+                break;
+            }
+        }
+        
+        // Get last 10 messages (should cover ~5 per side), excluding scene messages
+        const recentMessages = conversationHistory.slice(-10)
+            .filter(msg => msg.role !== 'scene') // Exclude scenes since we show previous scene separately
+            .map(msg => {
+                if (msg.role === 'user') return `User: ${msg.text}`;
+                if (msg.role === 'npc' || msg.role === 'assistant') return `${npcData.name}: ${msg.text}`;
+                return '';
+            })
+            .filter(m => m)
+            .join('\n');
+        
+        conversationSection = `
+    ${previousSceneText ? `Previous Scene:
+    ${previousSceneText}
+    
+    ` : ''}Recent Conversation (last ~5 exchanges):
+    ${recentMessages}
+    `;
+    }
+    
+    const systemPrompt = `You are a creative Dungeon Master helper. Your task is to generate a concise scene for a roleplay conversation with the following NPC.
     
     NPC: ${npcData.name} (${npcData.raceClass})
     Personality: ${npcData.personality}
-    Principal Desire/Want: ${npcData.wants}
-    Current Location/Context: The user is about to start a conversation with this NPC.
+    Principal Desire/Want: ${npcData.wants}${conversationSection}
     
     Output Format:
-    Location: [Where the scene takes place]
+    Setting: [Where the scene takes place, time of day if relevant${conversationHistory && conversationHistory.length > 0 ? ', and how much time passed since the previous scene if there was a time skip' : ''}. May include brief atmospheric details like weather, sounds, or smells if relevant]
 
-    Context: [What the NPC is doing and how the User encountered them]
+    Context: [What the NPC is doing and how the User encountered them, or the development that arised in the conclusion of the previous scene]
 
-    Goal: [A specific objective for the User to achieve in this conversation]
+    Goal: [A specific objective for the User to achieve in this conversation scene]
     
     Requirements:
-    - Keep "Context" and "Goal" extremly short (max 1 sentence each).
-    - Ensure the scene is related to the NPC's "Principal Desire/Want".
-    - Separate the three sections (Location, Context, Goal) with an empty line between them.
+    - Keep all three sections short (max 1 sentence each).
+    - Separate the three sections (Setting, Context, Goal) with an empty line between them.
+    ${conversationHistory && conversationHistory.length > 0 ? '- The new scene should take place some time after the events in the conversation so far, and offer a fresh, *new* direction or development for the Goal as well. A short time skip is acceptable.' : ''}
+    - Make the Goal be something the NPC could provide or assist with, but requires some effort or convincing from the user.
     - Do not use markdown bolding in the output logic, just plain text headers are fine.
     `;
 
     const payload = {
-        contents: [{ parts: [{ text: "Generate a starting scene." }] }],
+        contents: [{ parts: [{ text: "Generate a scene." }] }],
         systemInstruction: { parts: [{ text: systemPrompt }] }
     };
 
@@ -394,8 +427,8 @@ const generateStartingScene = async (npcData) => {
         if (!text) throw new Error("Model returned no text response.");
         return text.trim();
     } catch (e) {
-        console.error("Error generating starting scene:", e);
-        throw new Error("Failed to generate starting scene.");
+        console.error("Error generating scene:", e);
+        throw new Error("Failed to generate scene.");
     }
 };
 
@@ -521,7 +554,8 @@ const getNPCResponse = async (structuredData, chatHistory) => {
         - **Wants:** ${structuredData.wants}
         - **Secret:** ${structuredData.secrets}
         
-        Stay in character and base your responses on the provided information. Do not break character. Do not reveal your secrets unless explicitly forced or tricked.
+        Stay in character and base your responses on the provided information. Do not break character. Do not reveal your secrets unless explicitly forced or tricked, or you think it would benefit the NPC to reveal it.
+        Start the conversation with a good level of patience and interest to hear the user out, and adjust them in response to the user's actions and words.
         
         ***CRITICAL: Keep responses SHORT and natural.*** Respond with 1-3 sentences maximum unless the character is explicitly described as verbose or chatty. Speak like a real person in conversation, not like you're writing a story.
         
@@ -1573,6 +1607,109 @@ const ConfirmationModal = ({ isOpen, onClose, onConfirm, title, message }) => {
     );
 };
 
+const SceneModal = ({ 
+    isOpen, 
+    onClose, 
+    sceneText, 
+    isGenerating, 
+    isEditing,
+    onEdit,
+    onSave, 
+    onRegenerate, 
+    onStartWithScene 
+}) => {
+    useEffect(() => {
+        const handleEscape = (e) => {
+            if (e.key === 'Escape' && isOpen) {
+                onClose();
+            }
+        };
+
+        window.addEventListener('keydown', handleEscape);
+        return () => window.removeEventListener('keydown', handleEscape);
+    }, [isOpen, onClose]);
+
+    if (!isOpen) return null;
+
+    return (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50" onClick={onClose}>
+            <div 
+                className="w-full max-w-2xl bg-white rounded-xl shadow-2xl border-2 border-indigo-100 overflow-hidden animate-in fade-in zoom-in-95 duration-200"
+                onClick={e => e.stopPropagation()}
+            >
+                {isGenerating ? (
+                    <div className="p-12 flex flex-col items-center text-indigo-600">
+                        <Wand2 className="w-12 h-12 mb-4 animate-magic" />
+                        <h3 className="text-xl font-bold">Setting the Scene...</h3>
+                        <p className="text-sm text-indigo-400">Consulting the Dungeon Master...</p>
+                    </div>
+                ) : (
+                    <>
+                        <div className="bg-indigo-50 p-4 border-b border-indigo-100 flex items-center justify-between">
+                            <h3 className="font-bold text-indigo-800 flex items-center">
+                                <Sparkles className="w-4 h-4 mr-2 text-indigo-500" />
+                                New Scene
+                            </h3>
+                            <div className="flex items-center gap-2">
+                                {!isEditing && (
+                                    <>
+                                        <button
+                                            onClick={onRegenerate}
+                                            className="p-1.5 text-purple-600 hover:bg-purple-100 rounded-lg transition-colors"
+                                            title="Regenerate Scene"
+                                        >
+                                            <Wand2 className="w-4 h-4" />
+                                        </button>
+                                        <button
+                                            onClick={onClose}
+                                            className="p-1.5 text-gray-500 hover:bg-gray-200 rounded-lg transition-colors"
+                                            title="Close"
+                                        >
+                                            <X className="w-4 h-4" />
+                                        </button>
+                                    </>
+                                )}
+                            </div>
+                        </div>
+
+                        <div className="p-4 text-left">
+                            <EditableField
+                                label="Scene Description"
+                                value={sceneText}
+                                onSave={onSave}
+                                type="textarea"
+                                hideLabel={true}
+                                textClassName="min-h-[150px]"
+                                rows={10}
+                                stayInModeAfterRegenerate={true}
+                                onEditStateChange={onEdit}
+                            />
+                        </div>
+
+                        {!isEditing && (
+                            <div className="p-4 bg-gray-50 border-t border-gray-100 flex justify-end items-center gap-4">
+                                <button
+                                    onClick={onClose}
+                                    className="px-4 py-2 text-gray-600 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors font-medium"
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    onClick={onStartWithScene}
+                                    className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors font-medium flex items-center"
+                                >
+                                    <Play className="w-4 h-4 mr-2" />
+                                    Start Scene
+                                </button>
+                            </div>
+                        )}
+                    </>
+                )}
+            </div>
+        </div>
+    );
+};
+
 const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileView = 'details', onShowConversation, onShowDetails }) => {
     const [message, setMessage] = useState('');
     const [chatHistory, setChatHistory] = useState(npc.chats || []);
@@ -1756,7 +1893,13 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
         // Check for slash command /scene
         if (text.toLowerCase().startsWith('/scene')) {
             const sceneText = text.substring(6).trim();
-            if (!sceneText) return; // Ignore empty scene commands
+            
+            // If no text after /scene, open the scene wizard
+            if (!sceneText) {
+                setMessage('');
+                handleOpenSceneWizard();
+                return;
+            }
 
             stopAudio();
             setMessage('');
@@ -1985,7 +2128,7 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
     };
 
 
-    // --- Starting Scene Logic ---
+    // --- Scene Wizard Logic ---
 
     const handleOpenSceneWizard = () => {
         setIsSceneWizardOpen(true);
@@ -2007,7 +2150,7 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
      */
     const fetchStartingScene = async () => {
         try {
-            return await generateStartingScene(npc.structuredData);
+            return await generateScene(npc.structuredData, chatHistory);
         } catch (e) {
             console.error("Error generating scene:", e);
             throw e;
@@ -2365,7 +2508,7 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
                                         <div className="bg-indigo-50 p-4 border-b border-indigo-100 flex items-center justify-between">
                                             <h3 className="font-bold text-indigo-800 flex items-center">
                                                 <Sparkles className="w-4 h-4 mr-2 text-indigo-500" />
-                                                Starting Scene
+                                                New Scene
                                             </h3>
                                             <div className="flex items-center gap-2">
                                                 {!isEditingSceneField && (
@@ -2506,6 +2649,19 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
                         imageUrl={currentImageUrl}
                         altText={npc.name}
                     />
+                    {chatHistory.length > 0 && (
+                        <SceneModal
+                            isOpen={isSceneWizardOpen}
+                            onClose={handleCancelScene}
+                            sceneText={startingSceneText}
+                            isGenerating={isGeneratingScene}
+                            isEditing={isEditingSceneField}
+                            onEdit={setIsEditingSceneField}
+                            onSave={handleSaveSceneEdit}
+                            onRegenerate={handleRegenerateSceneForField}
+                            onStartWithScene={handleStartWithScene}
+                        />
+                    )}
                 </div>
             );
         } else if (mobileView === 'conversation') {
@@ -2568,7 +2724,7 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
                                             <div className="bg-indigo-50 p-4 border-b border-indigo-100 flex items-center justify-between">
                                                 <h3 className="font-bold text-indigo-800 flex items-center">
                                                     <Sparkles className="w-4 h-4 mr-2 text-indigo-500" />
-                                                    Starting Scene
+                                                    New Scene
                                                 </h3>
                                                 <div className="flex space-x-2">
                                                     {!isEditingScene ? (
@@ -2692,6 +2848,19 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
                         imageUrl={currentImageUrl}
                         altText={npc.name}
                     />
+                    {chatHistory.length > 0 && (
+                        <SceneModal
+                            isOpen={isSceneWizardOpen}
+                            onClose={handleCancelScene}
+                            sceneText={startingSceneText}
+                            isGenerating={isGeneratingScene}
+                            isEditing={isEditingSceneField}
+                            onEdit={setIsEditingSceneField}
+                            onSave={handleSaveSceneEdit}
+                            onRegenerate={handleRegenerateSceneForField}
+                            onStartWithScene={handleStartWithScene}
+                        />
+                    )}
                 </div >
             );
         }
@@ -2714,6 +2883,19 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
                 imageUrl={currentImageUrl}
                 altText={npc.name}
             />
+            {chatHistory.length > 0 && (
+                <SceneModal
+                    isOpen={isSceneWizardOpen}
+                    onClose={handleCancelScene}
+                    sceneText={startingSceneText}
+                    isGenerating={isGeneratingScene}
+                    isEditing={isEditingSceneField}
+                    onEdit={setIsEditingSceneField}
+                    onSave={handleSaveSceneEdit}
+                    onRegenerate={handleRegenerateSceneForField}
+                    onStartWithScene={handleStartWithScene}
+                />
+            )}
         </div>
     );
 };
