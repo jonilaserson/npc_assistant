@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { onAuthStateChanged, signInAnonymously, signInWithCustomToken } from 'firebase/auth';
-import { collection, deleteDoc, doc, onSnapshot, orderBy, query, setDoc, updateDoc } from 'firebase/firestore';
+import { collection, deleteDoc, doc, getDocs, onSnapshot, orderBy, query, setDoc, updateDoc, where } from 'firebase/firestore';
 import { getDownloadURL, ref, uploadString } from 'firebase/storage';
 import { auth, db, storage } from './firebaseConfig';
-import { Loader2, Zap, Brain, Wand2, MessageSquare, List, Send, Volume2, VolumeX, User, ChevronsDown, ChevronsUp, RefreshCw, Trash2, X, ChevronLeft, ChevronRight, Plus, GripVertical, Check, RotateCcw, Edit2, Eye, EyeOff, Sparkles, Maximize2, Play } from 'lucide-react';
+import { Loader2, Zap, Brain, Wand2, MessageSquare, List, Send, Volume2, VolumeX, User, ChevronsDown, ChevronsUp, RefreshCw, Trash2, X, ChevronLeft, ChevronRight, Plus, GripVertical, Check, RotateCcw, Edit2, Eye, EyeOff, Sparkles, Maximize2, Play, Share2 } from 'lucide-react';
 import { FeedbackButton } from './components/FeedbackButton';
 import { logUsage } from './analytics';
 import * as Sentry from "@sentry/react";
@@ -1083,7 +1083,85 @@ const textToSpeech = async (text, structuredData) => {
 
 // Path constants
 const NPC_COLLECTION_NAME = 'npcs';
+const SHARED_NPC_COLLECTION_NAME = 'shared_npcs';
 const npcCollectionPath = (appId, userId) => `users/${userId}/${NPC_COLLECTION_NAME}`;
+const sharedNpcCollectionPath = (appId, userId) => `users/${userId}/${SHARED_NPC_COLLECTION_NAME}`;
+
+// Helper function to get userId by email
+const getUserIdByEmail = async (db, email) => {
+    try {
+        const usersRef = collection(db, 'all_users');
+        const q = query(usersRef, where('email', '==', email));
+        const snapshot = await getDocs(q);
+        
+        if (snapshot.empty) {
+            return null;
+        }
+        
+        return snapshot.docs[0].id;
+    } catch (error) {
+        console.error("Error getting user by email:", error);
+        return null;
+    }
+};
+
+// Helper function to share an NPC
+const shareNPC = async (db, npc, senderUserId, senderEmail, recipientEmail, includeFirstScene) => {
+    try {
+        // Get recipient's userId
+        const recipientUserId = await getUserIdByEmail(db, recipientEmail);
+        
+        if (!recipientUserId) {
+            throw new Error(`No user found with email: ${recipientEmail}`);
+        }
+        
+        if (recipientUserId === senderUserId) {
+            throw new Error("You cannot share an NPC with yourself");
+        }
+        
+        // Check if NPC has a first scene
+        let firstScene = null;
+        if (includeFirstScene && npc.chats && npc.chats.length > 0 && npc.chats[0].role === 'scene') {
+            firstScene = npc.chats[0];
+        }
+        
+        // Create the shared NPC data
+        const sharedNpcData = {
+            // Copy all NPC fields
+            name: npc.name,
+            description: npc.description,
+            structuredData: npc.structuredData,
+            imageUrl: npc.imageUrl,
+            cloudinaryImageId: npc.cloudinaryImageId,
+            
+            // Add sharing metadata
+            isSharedNPC: true,
+            sharedFrom: {
+                userId: senderUserId,
+                userEmail: senderEmail,
+                timestamp: new Date().toISOString()
+            },
+            sharedWithScene: includeFirstScene && firstScene !== null,
+            protectedFirstScene: includeFirstScene && firstScene !== null,
+            
+            // Initialize chats with first scene if included
+            chats: firstScene ? [firstScene] : [],
+            
+            // Set timestamps
+            createdAt: new Date().toISOString(),
+            ownerId: recipientUserId,
+        };
+        
+        // Add to recipient's shared_npcs collection
+        const sharedNpcRef = doc(collection(db, sharedNpcCollectionPath(appId, recipientUserId)));
+        await setDoc(sharedNpcRef, { ...sharedNpcData, id: sharedNpcRef.id });
+        
+        return { success: true, recipientUserId };
+    } catch (error) {
+        console.error("Error sharing NPC:", error);
+        throw error;
+    }
+};
 
 // Tips to show in rotation
 const TIPS = [
@@ -1131,9 +1209,46 @@ function useNPCs(db, userId, isAuthReady) {
     return { npcs, loading };
 }
 
+function useSharedNPCs(db, userId, isAuthReady) {
+    const [sharedNpcs, setSharedNpcs] = useState([]);
+    const [loading, setLoading] = useState(true);
+
+    useEffect(() => {
+        if (!isAuthReady || !userId) {
+            setLoading(true);
+            return;
+        }
+
+        if (!db) {
+            // Demo mode or no DB connection
+            setLoading(false);
+            return;
+        }
+
+        const path = sharedNpcCollectionPath(appId, userId);
+        const q = query(collection(db, path), orderBy('createdAt', 'desc'));
+
+        setLoading(false);
+        const unsubscribe = onSnapshot(q, (snapshot) => {
+            const npcList = snapshot.docs.map(doc => ({
+                id: doc.id,
+                ...doc.data()
+            }));
+            setSharedNpcs(npcList);
+        }, (error) => {
+            console.error("Error listening to shared NPCs:", error);
+            setLoading(false);
+        });
+
+        return () => unsubscribe();
+    }, [db, userId, isAuthReady]);
+
+    return { sharedNpcs, loading };
+}
+
 // --- Editable Field Component ---
 
-const EditableField = ({ label, value, displayValue, onSave, onRegenerate, onExpand, type = 'text', options = [], className = '', hideLabel = false, textClassName = '', stayInModeAfterRegenerate = false, onEditStateChange, rows = 6 }) => {
+const EditableField = ({ label, value, displayValue, onSave, onRegenerate, onExpand, type = 'text', options = [], className = '', hideLabel = false, textClassName = '', stayInModeAfterRegenerate = false, onEditStateChange, rows = 6, disabled = false }) => {
     const [isEditing, setIsEditing] = useState(false);
     const [tempValue, setTempValue] = useState(value);
     const [isSaving, setIsSaving] = useState(false);
@@ -1411,15 +1526,15 @@ const EditableField = ({ label, value, displayValue, onSave, onRegenerate, onExp
 
     return (
         <div
-            onClick={() => setIsEditing(true)}
-            className={`group relative p-2 rounded-lg hover:bg-indigo-100 cursor-pointer transition-colors ${className}`}
-            title="Click to edit"
+            onClick={disabled ? undefined : () => setIsEditing(true)}
+            className={`group relative p-2 rounded-lg ${disabled ? 'cursor-default' : 'hover:bg-indigo-100 cursor-pointer'} transition-colors ${className}`}
+            title={disabled ? "" : "Click to edit"}
         >
             <style>{magicalStyles}</style>
             <div className="flex items-center justify-between mb-0.5">
                 {!hideLabel && <p className="text-xs font-bold text-indigo-700">{label}</p>}
                 <div className="flex items-center space-x-1">
-                    {onExpand && (
+                    {!disabled && onExpand && (
                         <div className="relative">
                             <button
                                 onClick={handleExpand}
@@ -1435,7 +1550,7 @@ const EditableField = ({ label, value, displayValue, onSave, onRegenerate, onExp
                             </button>
                         </div>
                     )}
-                    {onRegenerate && (
+                    {!disabled && onRegenerate && (
                         <div className="relative">
                             <button
                                 onClick={handleRegenerate}
@@ -1458,7 +1573,7 @@ const EditableField = ({ label, value, displayValue, onSave, onRegenerate, onExp
                 </div>
             </div>
             <p className={`whitespace-pre-wrap break-words ${textClassName || 'text-sm text-gray-800'}`}>{displayValue || value || <span className="text-gray-400 italic">Empty</span>}</p>
-            {!onRegenerate && <Edit2 className="absolute top-2 right-2 w-3 h-3 text-indigo-400 opacity-0 group-hover:opacity-100 transition-opacity" />}
+            {!disabled && !onRegenerate && <Edit2 className="absolute top-2 right-2 w-3 h-3 text-indigo-400 opacity-0 group-hover:opacity-100 transition-opacity" />}
         </div>
     );
 };
@@ -1602,7 +1717,7 @@ const NpcCreation = ({ db, userId, onNpcCreated }) => {
 
 // --- Chat Interface Components ---
 
-const ChatBubble = ({ message, npcName, isSpeaking, onSpeakClick, onSetNextScene, onRollbackToScene, showGoalButtons, currentTip }) => {
+const ChatBubble = ({ message, npcName, isSpeaking, onSpeakClick, onSetNextScene, onRollbackToScene, showGoalButtons, currentTip, isProtected }) => {
     const isNpc = message.role === 'npc';
     const isScene = message.role === 'scene';
     const isGoalAchieved = message.role === 'goal_achieved';
@@ -1615,16 +1730,18 @@ const ChatBubble = ({ message, npcName, isSpeaking, onSpeakClick, onSetNextScene
             <div className="flex w-full justify-center my-4">
                 <div className="w-[80%] max-w-lg p-4 rounded-lg shadow-sm text-left border-2 bg-indigo-50 border-indigo-500 relative">
                     <p className="text-xs font-bold uppercase tracking-wider mb-1 opacity-70 text-indigo-700">
-                        Scene
+                        Scene {isProtected && <span className="text-xs font-normal">(Protected)</span>}
                     </p>
                     <p className="font-mono text-sm italic text-gray-900 whitespace-pre-wrap">{message.text}</p>
-                    <button
-                        onClick={onRollbackToScene}
-                        className="absolute bottom-2 right-2 p-1.5 text-indigo-400 hover:text-indigo-600 hover:bg-indigo-100 rounded-full transition-colors"
-                        title="Rollback to this scene"
-                    >
-                        <RotateCcw className="w-4 h-4" />
-                    </button>
+                    {!isProtected && (
+                        <button
+                            onClick={onRollbackToScene}
+                            className="absolute bottom-2 right-2 p-1.5 text-indigo-400 hover:text-indigo-600 hover:bg-indigo-100 rounded-full transition-colors"
+                            title="Rollback to this scene"
+                        >
+                            <RotateCcw className="w-4 h-4" />
+                        </button>
+                    )}
                 </div>
             </div>
         );
@@ -1879,6 +1996,184 @@ const SceneModal = ({
     );
 };
 
+const ShareNPCModal = ({ isOpen, onClose, npc, db, userId, userEmail }) => {
+    const [recipientEmail, setRecipientEmail] = useState('');
+    const [includeFirstScene, setIncludeFirstScene] = useState(false);
+    const [isSharing, setIsSharing] = useState(false);
+    const [status, setStatus] = useState('');
+    const [statusType, setStatusType] = useState(''); // 'success' or 'error'
+
+    const hasFirstScene = npc?.chats?.length > 0 && npc.chats[0].role === 'scene';
+
+    useEffect(() => {
+        if (isOpen) {
+            // Reset state when modal opens
+            setRecipientEmail('');
+            setIncludeFirstScene(false);
+            setStatus('');
+            setStatusType('');
+        }
+    }, [isOpen]);
+
+    useEffect(() => {
+        const handleEscape = (e) => {
+            if (e.key === 'Escape' && isOpen && !isSharing) {
+                onClose();
+            }
+        };
+
+        window.addEventListener('keydown', handleEscape);
+        return () => window.removeEventListener('keydown', handleEscape);
+    }, [isOpen, isSharing, onClose]);
+
+    const handleShare = async () => {
+        const email = recipientEmail.trim().toLowerCase();
+        
+        if (!email) {
+            setStatus('Please enter an email address');
+            setStatusType('error');
+            return;
+        }
+
+        // Basic email validation
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        if (!emailRegex.test(email)) {
+            setStatus('Please enter a valid email address');
+            setStatusType('error');
+            return;
+        }
+
+        setIsSharing(true);
+        setStatus('Sharing NPC...');
+        setStatusType('');
+
+        try {
+            await shareNPC(db, npc, userId, userEmail, email, includeFirstScene);
+            setStatus(`Successfully shared "${npc.name}" with ${email}!`);
+            setStatusType('success');
+            
+            // Log usage
+            await logUsage(userId, userEmail, 'npc_shared', {
+                npcId: npc.id,
+                npcName: npc.name,
+                recipientEmail: email,
+                includeFirstScene
+            });
+
+            // Close modal after 2 seconds
+            setTimeout(() => {
+                onClose();
+            }, 2000);
+        } catch (error) {
+            console.error('Error sharing NPC:', error);
+            setStatus(error.message || 'Failed to share NPC');
+            setStatusType('error');
+        } finally {
+            setIsSharing(false);
+        }
+    };
+
+    if (!isOpen) return null;
+
+    return (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 px-4" onClick={onClose}>
+            <div 
+                className="w-full max-w-md bg-white rounded-xl shadow-2xl border-2 border-indigo-100 overflow-hidden animate-in fade-in zoom-in-95 duration-200"
+                onClick={e => e.stopPropagation()}
+            >
+                <div className="bg-indigo-50 p-4 border-b border-indigo-100 flex items-center justify-between">
+                    <h3 className="font-bold text-indigo-800 flex items-center">
+                        <Share2 className="w-4 h-4 mr-2 text-indigo-500" />
+                        Share "{npc?.name}"
+                    </h3>
+                    <button
+                        onClick={onClose}
+                        className="p-1.5 text-gray-500 hover:bg-gray-200 rounded-lg transition-colors"
+                        title="Close"
+                        disabled={isSharing}
+                    >
+                        <X className="w-4 h-4" />
+                    </button>
+                </div>
+
+                <div className="p-6 space-y-4">
+                    <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                            Recipient Email
+                        </label>
+                        <input
+                            type="email"
+                            value={recipientEmail}
+                            onChange={(e) => setRecipientEmail(e.target.value)}
+                            placeholder="user@example.com"
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                            disabled={isSharing}
+                        />
+                    </div>
+
+                    {hasFirstScene && (
+                        <div className="flex items-start space-x-2">
+                            <input
+                                type="checkbox"
+                                id="includeFirstScene"
+                                checked={includeFirstScene}
+                                onChange={(e) => setIncludeFirstScene(e.target.checked)}
+                                className="mt-1 w-4 h-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500"
+                                disabled={isSharing}
+                            />
+                            <label htmlFor="includeFirstScene" className="text-sm text-gray-700 cursor-pointer">
+                                <span className="font-medium">Include first scene</span>
+                                <p className="text-xs text-gray-500 mt-1">
+                                    The recipient will start with this scene and it will be protected from deletion
+                                </p>
+                            </label>
+                        </div>
+                    )}
+
+                    {status && (
+                        <div className={`p-3 rounded-lg text-sm ${
+                            statusType === 'success' 
+                                ? 'bg-green-50 text-green-800 border border-green-200' 
+                                : statusType === 'error'
+                                ? 'bg-red-50 text-red-800 border border-red-200'
+                                : 'bg-blue-50 text-blue-800 border border-blue-200'
+                        }`}>
+                            {status}
+                        </div>
+                    )}
+                </div>
+
+                <div className="p-4 bg-gray-50 border-t border-gray-100 flex justify-end items-center gap-3">
+                    <button
+                        onClick={onClose}
+                        className="px-4 py-2 text-gray-600 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors font-medium"
+                        disabled={isSharing}
+                    >
+                        Cancel
+                    </button>
+                    <button
+                        onClick={handleShare}
+                        className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors font-medium flex items-center disabled:opacity-50 disabled:cursor-not-allowed"
+                        disabled={isSharing || statusType === 'success'}
+                    >
+                        {isSharing ? (
+                            <>
+                                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                                Sharing...
+                            </>
+                        ) : (
+                            <>
+                                <Share2 className="w-4 h-4 mr-2" />
+                                Share NPC
+                            </>
+                        )}
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+};
+
 const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileView = 'details', onShowConversation, onShowDetails, currentTip }) => {
     const [message, setMessage] = useState('');
     const [chatHistory, setChatHistory] = useState(npc.chats || []);
@@ -1891,6 +2186,7 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
     const [currentImageUrl, setCurrentImageUrl] = useState(null);
     const [isImageGenerating, setIsImageGenerating] = useState(false);
     const [isImageModalOpen, setIsImageModalOpen] = useState(false);
+    const [isShareModalOpen, setIsShareModalOpen] = useState(false);
 
     // Scene State
     const [startingSceneText, setStartingSceneText] = useState('');
@@ -2129,6 +2425,62 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
         }
     };
 
+    // Helper function to get NPC response, update state and Firestore
+    // Returns: { npcResponseText, isGoalAchieved, finalHistory }
+    const getNPCResponseAndUpdate = async (historyBeforeResponse, options = {}) => {
+        const {
+            checkGoal = false,
+            playAudioOnResponse = false
+        } = options;
+        
+        // Get NPC response (and check goal if needed)
+        const npcResponse = await getNPCResponse(
+            npc.structuredData,
+            historyBeforeResponse,
+            checkGoal ? currentSceneGoal : null
+        );
+        
+        // Handle response format (string or object with goalAchieved)
+        let npcResponseText;
+        let isGoalAchieved = false;
+        
+        if (typeof npcResponse === 'string') {
+            npcResponseText = npcResponse;
+        } else {
+            npcResponseText = npcResponse.response;
+            isGoalAchieved = npcResponse.goalAchieved;
+        }
+        
+        // Create NPC message
+        const npcMsg = {
+            role: 'npc',
+            text: npcResponseText,
+            timestamp: new Date().toISOString()
+        };
+        
+        let finalHistory = [...historyBeforeResponse, npcMsg];
+        
+        // Update state
+        setChatHistory(finalHistory);
+        
+        // Update Firestore
+        const collectionPath = npc.isSharedNPC ? sharedNpcCollectionPath(appId, userId) : npcCollectionPath(appId, userId);
+        const npcRef = doc(db, collectionPath, npc.id);
+        await updateDoc(npcRef, {
+            chats: finalHistory,
+            updatedAt: new Date().toISOString()
+        });
+        
+        // Auto-play audio if requested and enabled
+        if (playAudioOnResponse && isAutoPlayEnabled && npc.structuredData.voiceId) {
+            const voiceId = npc.structuredData.voiceId.split(' ')[0];
+            const npcMessageIndex = historyBeforeResponse.length;
+            await playAudio(npcResponseText, voiceId, npcMessageIndex);
+        }
+        
+        return { npcResponseText, isGoalAchieved, finalHistory };
+    };
+
     const handleSend = async () => {
         const text = message.trim();
         if (!text || isThinking) return;
@@ -2146,6 +2498,7 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
 
             stopAudio();
             setMessage('');
+            setIsThinking(true);
 
             const sceneMsg = { role: 'scene', text: sceneText, timestamp: new Date().toISOString() };
             const newHistory = [...chatHistory, sceneMsg];
@@ -2164,28 +2517,27 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
             setChatHistory(newHistory);
             scrollToBottom('chat-container');
 
-            if (db) {
-                try {
-                    const npcRef = doc(db, npcCollectionPath(appId, userId), npc.id);
-                    await updateDoc(npcRef, {
-                        chats: newHistory,
-                        updatedAt: new Date().toISOString()
-                    });
+            try {
+                // Get NPC response to the scene
+                await getNPCResponseAndUpdate(
+                    newHistory,
+                    { checkGoal: false, playAudioOnResponse: isAutoPlayEnabled }
+                );
 
-                    // Log usage
-                    await logUsage(userId, userEmail, 'scene_command', {
-                        npcId: npc.id,
-                        sceneLength: sceneText.length
-                    });
+                // Log usage
+                await logUsage(userId, userEmail, 'scene_command', {
+                    npcId: npc.id,
+                    sceneLength: sceneText.length
+                });
 
-                } catch (e) {
-                    console.error("Error saving scene:", e);
-                }
+            } catch (e) {
+                console.error("Error after scene command:", e);
+                alert("Scene added, but NPC couldn't respond. Please try sending a message.");
+            } finally {
+                setIsThinking(false);
             }
-            // Refocus input
-            setTimeout(() => {
-                messageInputRef.current?.focus();
-            }, 0);
+            
+            scrollToBottom('chat-container');
             return;
         }
 
@@ -2201,27 +2553,14 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
         scrollToBottom('chat-container');
 
         try {
-            // 2. Get NPC response (and check goal if we have one)
+            // 2. Get NPC response (with goal checking if applicable)
             const shouldCheckGoal = currentSceneGoal && goalAchievedForScene === null;
-            const npcResponse = await getNPCResponse(
-                npc.structuredData, 
-                newHistory, 
-                shouldCheckGoal ? currentSceneGoal : null
+            const { npcResponseText, isGoalAchieved, finalHistory: historyWithNPC } = await getNPCResponseAndUpdate(
+                newHistory,
+                { checkGoal: shouldCheckGoal, playAudioOnResponse: false }
             );
             
-            // Handle response format (string or object with goalAchieved)
-            let npcResponseText;
-            let isGoalAchieved = false;
-            
-            if (typeof npcResponse === 'string') {
-                npcResponseText = npcResponse;
-            } else {
-                npcResponseText = npcResponse.response;
-                isGoalAchieved = npcResponse.goalAchieved;
-            }
-            
-            const npcMsg = { role: 'npc', text: npcResponseText, timestamp: new Date().toISOString() };
-            let finalHistory = [...newHistory, npcMsg];
+            let finalHistory = historyWithNPC;
 
             // 3. If goal was achieved, add achievement message
             if (isGoalAchieved && shouldCheckGoal) {
@@ -2249,18 +2588,19 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
                 
                 // Play success sound
                 playSuccessSound();
+                
+                // Update Firestore with goal achieved message
+                const collectionPath = npc.isSharedNPC ? sharedNpcCollectionPath(appId, userId) : npcCollectionPath(appId, userId);
+                const npcRef = doc(db, collectionPath, npc.id);
+                await updateDoc(npcRef, {
+                    chats: finalHistory,
+                    updatedAt: new Date().toISOString()
+                });
+                
+                setChatHistory(finalHistory);
             }
 
-            // 4. Update Firestore with the full final history
-            const npcRef = doc(db, npcCollectionPath(appId, userId), npc.id);
-            await updateDoc(npcRef, {
-                chats: finalHistory,
-                updatedAt: new Date().toISOString()
-            });
-
-            setChatHistory(finalHistory);
-
-            // Log chat message for analytics
+            // 4. Log chat message for analytics
             await logUsage(userId, userEmail, 'gemini_chat', {
                 npcId: npc.id,
                 npcName: npc.name,
@@ -2306,46 +2646,84 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
         const message = chatHistory[sceneIndex];
         if (!message || (message.role !== 'scene' && message.role !== 'goal_achieved')) return;
 
-        if (!confirm("Rollback to this point? This will clear all conversation from this point forward.")) return;
+        // Don't allow rollback to protected first scene
+        const isProtectedScene = npc.protectedFirstScene && sceneIndex === 0 && chatHistory[0].role === 'scene';
+        if (isProtectedScene) return;
+
+        if (!confirm("Rollback to this point? This will clear all conversation after it.")) return;
 
         try {
-            const isGoalAchieved = message.role === 'goal_achieved';
-            let newHistory;
-            
-            if (isGoalAchieved) {
-                // For goal_achieved: keep the goal_achieved message, remove everything after it
-                newHistory = chatHistory.slice(0, sceneIndex + 1);
-                // Clear scene cache so next scene will be freshly generated
-                delete sceneCache.current[npc.id];
-                setStartingSceneText('');
-            } else {
-                // For scene: remove the scene and everything after it, but save scene to cache
-                newHistory = chatHistory.slice(0, sceneIndex);
+            if (message.role === 'scene') {
+                // For scenes: remove the scene and everything after it
+                const newHistory = chatHistory.slice(0, sceneIndex);
+                
+                // Put the scene text in cache and state
                 sceneCache.current[npc.id] = message.text;
                 setStartingSceneText(message.text);
-                // Open scene modal with the cached scene
+
+                // Reset goal tracking state
+                setCurrentSceneGoal(null);
+                setGoalAchievedForScene(null);
+
+                // Update chat history in state and Firestore
+                setChatHistory(newHistory);
+                
+                if (db) {
+                    const collectionPath = npc.isSharedNPC ? sharedNpcCollectionPath(appId, userId) : npcCollectionPath(appId, userId);
+                    const npcRef = doc(db, collectionPath, npc.id);
+                    await updateDoc(npcRef, {
+                        chats: newHistory,
+                        updatedAt: new Date().toISOString()
+                    });
+                }
+
+                // Log usage
+                await logUsage(userId, userEmail, 'rollback_to_scene', {
+                    npcId: npc.id,
+                    sceneIndex
+                });
+
+                // Open the scene wizard with the scene in cache
                 setIsSceneWizardOpen(true);
+
+            } else if (message.role === 'goal_achieved') {
+                // For goal_achieved: keep the goal_achieved message, remove everything after it
+                const newHistory = chatHistory.slice(0, sceneIndex + 1);
+
+                // Update chat history in state and Firestore
+                setChatHistory(newHistory);
+                
+                if (db) {
+                    const collectionPath = npc.isSharedNPC ? sharedNpcCollectionPath(appId, userId) : npcCollectionPath(appId, userId);
+                    const npcRef = doc(db, collectionPath, npc.id);
+                    await updateDoc(npcRef, {
+                        chats: newHistory,
+                        updatedAt: new Date().toISOString()
+                    });
+                }
+
+                // Log usage
+                await logUsage(userId, userEmail, 'rollback_to_goal_achieved', {
+                    npcId: npc.id,
+                    messageIndex: sceneIndex
+                });
+                
+                scrollToBottom('chat-container');
             }
-
-            // Reset goal tracking state (common to both)
-            setCurrentSceneGoal(null);
-            setGoalAchievedForScene(null);
-
-            // Update Firestore (common to both)
-            const npcRef = doc(db, npcCollectionPath(appId, userId), npc.id);
-            await updateDoc(npcRef, {
-                chats: newHistory,
-                updatedAt: new Date().toISOString()
-            });
-            setChatHistory(newHistory);
 
         } catch (e) {
             console.error("Error rolling back:", e);
+            alert("Failed to rollback. Please try again.");
         }
     };
 
     const handleResetConversation = async () => {
-        if (!confirm("Are you sure you want to clear the conversation history? This cannot be undone.")) return;
+        const hasProtectedScene = npc.protectedFirstScene && chatHistory.length > 0 && chatHistory[0].role === 'scene';
+        const confirmMessage = hasProtectedScene
+            ? "This will clear the conversation but keep the protected starting scene. Continue?"
+            : "Are you sure you want to clear the conversation history? This cannot be undone.";
+            
+        if (!confirm(confirmMessage)) return;
 
         try {
             // Save the first scene to cache if it exists
@@ -2354,12 +2732,16 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
                 setStartingSceneText(chatHistory[0].text);
             }
 
-            const npcRef = doc(db, npcCollectionPath(appId, userId), npc.id);
+            // Determine what to reset to
+            const newChats = hasProtectedScene ? [chatHistory[0]] : [];
+            
+            const collectionPath = npc.isSharedNPC ? sharedNpcCollectionPath(appId, userId) : npcCollectionPath(appId, userId);
+            const npcRef = doc(db, collectionPath, npc.id);
             await updateDoc(npcRef, {
-                chats: [],
+                chats: newChats,
                 updatedAt: new Date().toISOString()
             });
-            setChatHistory([]);
+            setChatHistory(newChats);
             
             // Reset goal tracking state
             setCurrentSceneGoal(null);
@@ -2417,6 +2799,12 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
     };
 
     const handleUpdateField = async (field, value) => {
+        // Prevent updates to shared NPCs
+        if (npc.isSharedNPC) {
+            console.error("Cannot update shared NPC fields");
+            throw new Error("Cannot update shared NPC fields");
+        }
+
         // Optimistic update handled by Firestore listener, but we can also log it.
         console.log(`Updating ${field} to:`, value);
 
@@ -2571,10 +2959,11 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
         delete sceneCache.current[npc.id];
         setStartingSceneText('');
 
-        // Update Firestore
+        // Update Firestore with scene
         if (db) {
             try {
-                const npcRef = doc(db, npcCollectionPath(appId, userId), npc.id);
+                const collectionPath = npc.isSharedNPC ? sharedNpcCollectionPath(appId, userId) : npcCollectionPath(appId, userId);
+                const npcRef = doc(db, collectionPath, npc.id);
                 await updateDoc(npcRef, {
                     chats: newHistory,
                     updatedAt: new Date().toISOString()
@@ -2587,33 +2976,14 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
         // Trigger initial NPC message
         setIsThinking(true);
         try {
-            // Use the existing getNPCResponse function to get a proper response
-            const npcResponseText = await getNPCResponse(npc.structuredData, newHistory);
-            const npcMsg = { 
-                role: 'npc', 
-                text: npcResponseText, 
-                timestamp: new Date().toISOString() 
-            };
-            const finalHistory = [...newHistory, npcMsg];
-
-            // Update state and Firestore
-            setChatHistory(finalHistory);
-            
-            if (db) {
-                try {
-                    const npcRef = doc(db, npcCollectionPath(appId, userId), npc.id);
-                    await updateDoc(npcRef, {
-                        chats: finalHistory,
-                        updatedAt: new Date().toISOString()
-                    });
-                } catch (e) {
-                    console.error("Error saving NPC response:", e);
-                }
-            }
+            const { npcResponseText } = await getNPCResponseAndUpdate(
+                newHistory,
+                { checkGoal: false, playAudioOnResponse: false }
+            );
 
             // Auto-play if enabled
             if (isAutoPlayEnabled) {
-                handleSpeakClick(npcResponseText, finalHistory.length - 1);
+                handleSpeakClick(npcResponseText, chatHistory.length);
             }
 
         } catch (error) {
@@ -2650,14 +3020,32 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
     // Left panel: NPC details
     const npcDetailsPanel = (
         <div className="h-full p-6 overflow-y-auto bg-gray-50">
-            <EditableField
-                label="Name"
-                value={npc.name}
-                onSave={(val) => handleUpdateField('name', val)}
-                hideLabel={true}
-                textClassName="text-2xl font-bold text-gray-900"
-                className="mb-4 -m-2"
-            />
+            {/* Header with Name and Toolbar */}
+            <div className="flex items-start justify-between mb-4 -m-2">
+                <div className="flex-1 min-w-0">
+                    <EditableField
+                        label="Name"
+                        value={npc.name}
+                        onSave={(val) => handleUpdateField('name', val)}
+                        hideLabel={true}
+                        textClassName="text-2xl font-bold text-gray-900"
+                        className=""
+                        disabled={npc.isSharedNPC}
+                    />
+                </div>
+                {/* Toolbar */}
+                {!npc.isSharedNPC && (
+                    <div className="flex items-center ml-3 pt-2">
+                        <button
+                            onClick={() => setIsShareModalOpen(true)}
+                            className="p-2 text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
+                            title="Share NPC"
+                        >
+                            <Share2 className="w-5 h-5" />
+                        </button>
+                    </div>
+                )}
+            </div>
             <p className="mb-4 text-sm font-semibold text-indigo-600">{npc.structuredData.raceClass}</p>
 
             {currentImageUrl ? (
@@ -2675,8 +3063,8 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
 
             <button
                 onClick={handleRegenerateImage}
-                disabled={isImageGenerating}
-                className={`w-full mb-6 flex items-center justify-center px-4 py-2 font-semibold transition-all duration-200 rounded-lg shadow-md focus:outline-none focus:ring-2 focus:ring-opacity-75 ${isImageGenerating ? 'bg-purple-100 text-purple-700 cursor-not-allowed' : 'bg-purple-600 hover:bg-purple-700 text-white focus:ring-purple-500'}`}
+                disabled={isImageGenerating || npc.isSharedNPC}
+                className={`w-full mb-3 flex items-center justify-center px-4 py-2 font-semibold transition-all duration-200 rounded-lg shadow-md focus:outline-none focus:ring-2 focus:ring-opacity-75 ${isImageGenerating || npc.isSharedNPC ? 'bg-purple-100 text-purple-700 cursor-not-allowed' : 'bg-purple-600 hover:bg-purple-700 text-white focus:ring-purple-500'}`}
             >
                 <style>{magicalStyles}</style>
                 {isImageGenerating ? (
@@ -2691,6 +3079,19 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
                 {isImageGenerating ? 'Conjuring Masterpiece...' : 'Generate Epic Portrait'}
             </button>
 
+            {/* Shared Badge - only for shared NPCs */}
+            {npc.isSharedNPC && (
+                <div className="mb-6 p-3 bg-blue-50 border-2 border-blue-200 rounded-lg">
+                    <p className="text-sm font-semibold text-blue-800 flex items-center">
+                        <User className="w-4 h-4 mr-2" />
+                        Shared by {npc.sharedFrom?.userEmail || 'Unknown'}
+                    </p>
+                    <p className="text-xs text-blue-600 mt-1">
+                        This NPC is read-only. You can chat but cannot edit details.
+                    </p>
+                </div>
+            )}
+
             {/* GM Details Panel */}
             <div className="p-4 bg-indigo-50 rounded-xl shadow-inner border border-indigo-200">
                 {/* Always Visible Section */}
@@ -2702,6 +3103,7 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
                             type="select"
                             options={['male', 'female', 'other']}
                             onSave={(val) => handleUpdateField('gender', val)}
+                            disabled={npc.isSharedNPC}
                         />
                         <EditableField
                             label="Age"
@@ -2709,6 +3111,7 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
                             type="select"
                             options={['child', 'young adult', 'adult', 'middle-age', 'old']}
                             onSave={(val) => handleUpdateField('ageRange', val)}
+                            disabled={npc.isSharedNPC}
                         />
                     </div>
                     <EditableField
@@ -2719,11 +3122,13 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
                         options={AVAILABLE_VOICES}
                         onSave={(val) => handleUpdateField('voiceId', val)}
                         onRegenerate={handleRegenerateVoice}
+                        disabled={npc.isSharedNPC}
                     />
                     <EditableField
                         label="Race/Class"
                         value={npc.structuredData.raceClass}
                         onSave={(val) => handleUpdateField('raceClass', val)}
+                        disabled={npc.isSharedNPC}
                     />
                     <EditableField
                         label="Visual Description"
@@ -2731,6 +3136,7 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
                         type="textarea"
                         onSave={(val) => handleUpdateField('visual', val)}
                         onRegenerate={() => handleRegenerateField('visual')}
+                        disabled={npc.isSharedNPC}
                     />
                 </div>
 
@@ -2749,6 +3155,7 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
                             type="textarea"
                             onSave={(val) => handleUpdateField('personality', val)}
                             onRegenerate={() => handleRegenerateField('personality')}
+                            disabled={npc.isSharedNPC}
                         />
                         <EditableField
                             label="Wants"
@@ -2757,6 +3164,7 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
                             onSave={(val) => handleUpdateField('wants', val)}
                             onRegenerate={() => handleRegenerateField('wants')}
                             onExpand={() => handleExpandField('wants')}
+                            disabled={npc.isSharedNPC}
                         />
                         <EditableField
                             label="Pitfalls"
@@ -2765,6 +3173,7 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
                             onSave={(val) => handleUpdateField('pitfalls', val)}
                             onRegenerate={() => handleRegenerateField('pitfalls')}
                             onExpand={() => handleExpandField('pitfalls')}
+                            disabled={npc.isSharedNPC}
                         />
                         <div className="border-l-4 border-red-500 bg-red-50 rounded-r-lg">
                             <EditableField
@@ -2775,6 +3184,7 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
                                 onSave={(val) => handleUpdateField('secrets', val)}
                                 onRegenerate={() => handleRegenerateField('secrets')}
                                 onExpand={() => handleExpandField('secrets')}
+                                disabled={npc.isSharedNPC}
                             />
                         </div>
                     </div>
@@ -2849,6 +3259,9 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
                             const showGoalButtons = msg.role === 'goal_achieved' && 
                                 !chatHistory.slice(index + 1).some(m => m.role === 'scene');
                             
+                            // Check if this is a protected first scene
+                            const isProtected = npc.protectedFirstScene && index === 0 && msg.role === 'scene';
+                            
                             return (
                                 <ChatBubble
                                     key={index}
@@ -2860,6 +3273,7 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
                                     onRollbackToScene={() => handleRollbackToScene(index)}
                                     showGoalButtons={showGoalButtons}
                                     currentTip={currentTip}
+                                    isProtected={isProtected}
                                 />
                             );
                         })
@@ -2943,6 +3357,14 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
                         onRegenerate={handleGenerateStartingScene}
                         onStartWithScene={handleStartWithScene}
                     />
+                    <ShareNPCModal
+                        isOpen={isShareModalOpen}
+                        onClose={() => setIsShareModalOpen(false)}
+                        npc={npc}
+                        db={db}
+                        userId={userId}
+                        userEmail={userEmail}
+                    />
                 </div>
             );
         } else if (mobileView === 'conversation') {
@@ -3015,6 +3437,9 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
                                         const showGoalButtons = msg.role === 'goal_achieved' && 
                                             !chatHistory.slice(index + 1).some(m => m.role === 'scene');
                                         
+                                        // Check if this is a protected first scene
+                                        const isProtected = npc.protectedFirstScene && index === 0 && msg.role === 'scene';
+                                        
                                         return (
                                             <ChatBubble
                                                 key={index}
@@ -3026,6 +3451,7 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
                                                 onRollbackToScene={() => handleRollbackToScene(index)}
                                                 showGoalButtons={showGoalButtons}
                                                 currentTip={currentTip}
+                                                isProtected={isProtected}
                                             />
                                         );
                                     })
@@ -3080,6 +3506,14 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
                         onRegenerate={handleGenerateStartingScene}
                         onStartWithScene={handleStartWithScene}
                     />
+                    <ShareNPCModal
+                        isOpen={isShareModalOpen}
+                        onClose={() => setIsShareModalOpen(false)}
+                        npc={npc}
+                        db={db}
+                        userId={userId}
+                        userEmail={userEmail}
+                    />
                 </div >
             );
         }
@@ -3112,6 +3546,14 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
                 onSave={handleSaveSceneEdit}
                 onRegenerate={handleGenerateStartingScene}
                 onStartWithScene={handleStartWithScene}
+            />
+            <ShareNPCModal
+                isOpen={isShareModalOpen}
+                onClose={() => setIsShareModalOpen(false)}
+                npc={npc}
+                db={db}
+                userId={userId}
+                userEmail={userEmail}
             />
         </div>
     );
@@ -3228,13 +3670,20 @@ const CompactNpcListItem = ({ npc, isActive, onClick, onDelete }) => {
                     className="object-cover w-12 h-12 rounded-md flex-shrink-0 bg-gray-200"
                 />
                 <div className="flex-1 min-w-0">
-                    <h4 className="font-semibold text-gray-900 truncate">{npc.name}</h4>
+                    <div className="flex items-center gap-1">
+                        <h4 className="font-semibold text-gray-900 truncate">{npc.name}</h4>
+                        {npc.isSharedNPC && (
+                            <span className="flex-shrink-0 px-1.5 py-0.5 text-xs font-medium text-blue-700 bg-blue-100 rounded" title={`Shared by ${npc.sharedFrom?.userEmail}`}>
+                                <User className="w-3 h-3 inline" />
+                            </span>
+                        )}
+                    </div>
                     <p className="text-xs text-indigo-600 truncate">{npc.structuredData.raceClass}</p>
                     {npc.chats && npc.chats.length > 0 && (
                         <p className="text-xs text-gray-500">{npc.chats.length} messages</p>
                     )}
                 </div>
-                {!showDeleteConfirm ? (
+                {onDelete && !showDeleteConfirm ? (
                     <button
                         onClick={handleDelete}
                         className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-full transition-all duration-200 flex-shrink-0 opacity-0 group-hover:opacity-100"
@@ -3242,7 +3691,7 @@ const CompactNpcListItem = ({ npc, isActive, onClick, onDelete }) => {
                     >
                         <Trash2 className="w-4 h-4" />
                     </button>
-                ) : (
+                ) : showDeleteConfirm ? (
                     <div className="flex items-center bg-white shadow-sm border border-gray-200 rounded-full overflow-hidden animate-slide-in">
                         <button
                             onClick={confirmDelete}
@@ -3260,14 +3709,13 @@ const CompactNpcListItem = ({ npc, isActive, onClick, onDelete }) => {
                             <X className="w-4 h-4" />
                         </button>
                     </div>
-                )
-                }
-            </div >
-        </div >
+                ) : null}
+            </div>
+        </div>
     );
 };
 
-const CompactNpcList = ({ npcs, selectedNpcId, onNpcSelected, onNpcDelete, onCreateNew, loading, isCollapsed, onToggleCollapse }) => {
+const CompactNpcList = ({ npcs, sharedNpcs = [], selectedNpcId, onNpcSelected, onNpcDelete, onCreateNew, loading, isCollapsed, onToggleCollapse }) => {
     /**
      * Deletes an image from Cloudinary.
      */
@@ -3357,21 +3805,54 @@ const CompactNpcList = ({ npcs, selectedNpcId, onNpcSelected, onNpcDelete, onCre
                     <div className="flex items-center justify-center p-8">
                         <Loader2 className="w-6 h-6 animate-spin text-indigo-500" />
                     </div>
-                ) : npcs.length === 0 ? (
+                ) : npcs.length === 0 && sharedNpcs.length === 0 ? (
                     <div className="p-6 text-center text-gray-500 text-sm">
                         <p>No NPCs yet.</p>
                         <p className="mt-2">Click the <Plus className="w-4 h-4 inline" /> button to create your first one!</p>
                     </div>
                 ) : (
-                    npcs.map(npc => (
-                        <CompactNpcListItem
-                            key={npc.id}
-                            npc={npc}
-                            isActive={npc.id === selectedNpcId}
-                            onClick={() => onNpcSelected(npc)}
-                            onDelete={handleDelete}
-                        />
-                    ))
+                    <>
+                        {/* My NPCs Section */}
+                        {npcs.length > 0 && (
+                            <div>
+                                <div className="px-4 py-2 bg-gray-100 border-b border-gray-200">
+                                    <h3 className="text-xs font-bold text-gray-600 uppercase tracking-wide">
+                                        My NPCs ({npcs.length})
+                                    </h3>
+                                </div>
+                                {npcs.map(npc => (
+                                    <CompactNpcListItem
+                                        key={npc.id}
+                                        npc={npc}
+                                        isActive={npc.id === selectedNpcId}
+                                        onClick={() => onNpcSelected(npc)}
+                                        onDelete={handleDelete}
+                                    />
+                                ))}
+                            </div>
+                        )}
+                        
+                        {/* Shared with Me Section */}
+                        {sharedNpcs.length > 0 && (
+                            <div>
+                                <div className="px-4 py-2 bg-blue-50 border-b border-blue-200">
+                                    <h3 className="text-xs font-bold text-blue-700 uppercase tracking-wide flex items-center">
+                                        <User className="w-3 h-3 mr-1" />
+                                        Shared with Me ({sharedNpcs.length})
+                                    </h3>
+                                </div>
+                                {sharedNpcs.map(npc => (
+                                    <CompactNpcListItem
+                                        key={npc.id}
+                                        npc={npc}
+                                        isActive={npc.id === selectedNpcId}
+                                        onClick={() => onNpcSelected(npc)}
+                                        onDelete={handleDelete}
+                                    />
+                                ))}
+                            </div>
+                        )}
+                    </>
                 )}
             </div>
 
@@ -3513,6 +3994,14 @@ const NPCGeneratorChatbot = ({ user, impersonatedUserId, onShowAdmin }) => {
     const isAuthReady = true;
 
     const { npcs, loading } = useNPCs(db, userId, isAuthReady);
+    const { sharedNpcs, loading: sharedLoading } = useSharedNPCs(db, userId, isAuthReady);
+
+    // Combine owned and shared NPCs
+    const allNpcs = useMemo(() => {
+        return [...npcs, ...sharedNpcs];
+    }, [npcs, sharedNpcs]);
+
+    const isLoadingNpcs = loading || sharedLoading;
 
     // Retrieve API key from environment variables
     const apiKey = null; // API Key removed. Using Netlify Functions.
@@ -3558,8 +4047,8 @@ const NPCGeneratorChatbot = ({ user, impersonatedUserId, onShowAdmin }) => {
 
     // Derive the selected NPC object from the live list
     const selectedNpc = useMemo(() => {
-        return npcs.find(n => n.id === selectedNpcId) || null;
-    }, [npcs, selectedNpcId]);
+        return allNpcs.find(n => n.id === selectedNpcId) || null;
+    }, [allNpcs, selectedNpcId]);
 
     const handleNpcSelected = (npc) => {
         setSelectedNpcId(npc.id);
@@ -3594,9 +4083,13 @@ const NPCGeneratorChatbot = ({ user, impersonatedUserId, onShowAdmin }) => {
 
     const handleNpcDelete = async (npc) => {
         if (!db) return;
+        
         try {
-            const npcRef = doc(db, npcCollectionPath(appId, userId), npc.id);
+            // Use the correct collection path based on NPC type
+            const collectionPath = npc.isSharedNPC ? sharedNpcCollectionPath(appId, userId) : npcCollectionPath(appId, userId);
+            const npcRef = doc(db, collectionPath, npc.id);
             await deleteDoc(npcRef);
+            
             // If the deleted NPC was selected, clear selection
             if (selectedNpcId === npc.id) {
                 setSelectedNpcId(null);
@@ -3684,11 +4177,12 @@ const NPCGeneratorChatbot = ({ user, impersonatedUserId, onShowAdmin }) => {
     const leftPanelContent = (
         <CompactNpcList
             npcs={npcs}
+            sharedNpcs={sharedNpcs}
             selectedNpcId={selectedNpc?.id}
             onNpcSelected={handleNpcSelected}
             onNpcDelete={handleNpcDelete}
             onCreateNew={handleCreateNew}
-            loading={loading}
+            loading={isLoadingNpcs}
             isCollapsed={isSidebarCollapsed}
             onToggleCollapse={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
         />

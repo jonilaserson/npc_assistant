@@ -8,6 +8,20 @@ Transform your tabletop RPG sessions with intelligent, voice-enabled NPCs that b
 
 ---
 
+## 🔧 **Quick Start - Local Development**
+
+**⚠️ IMPORTANT: This project runs with Netlify Dev (NOT Vite directly)**
+
+```bash
+npx netlify dev
+```
+
+**Local URL:** `http://localhost:8888`
+
+*(This is required for Netlify Functions to work properly)*
+
+---
+
 ## ✨ Key Features
 
 ### 🤖 **AI-Powered Character Generation**
@@ -24,6 +38,9 @@ NPCs stay in character across entire conversations, remembering history and reac
 
 ### 🎬 **Dynamic Scene System**
 Set rich, contextual scenes that guide NPC interactions. AI automatically generates atmospheric scene descriptions complete with location, time, mood, and player objectives. The system intelligently tracks scene goals and celebrates when your players achieve them—then seamlessly transitions to the next scene. Perfect for structured adventures or spontaneous roleplay.
+
+### 🤝 **NPC Sharing & Collaboration**
+Share your favorite NPCs with other GMs instantly. Send complete character packages—including personality, voice, portrait, and optionally a protected starting scene—to any user by email. Recipients get a fully functional copy ready for their own campaigns. Perfect for sharing recurring characters across connected campaigns or building a shared world with your fellow GMs.
 
 ### ✨ **AI Field Regeneration**
 Any character trait can be regenerated or expanded with AI. Personality too bland? Regenerate it. Secret too simple? Expand it. Every field is editable and AI-enhanceable.
@@ -179,6 +196,11 @@ npc_assistant/
   - "Set Next Scene" button appears when goals are achieved
   - Seamless scene transitions that maintain conversation flow
   - Type `/scene` anytime to set a new scene
+  - Rollback to any scene to try different story branches
+- **NPC Sharing**: Share characters with other GMs by email
+  - Include starting scene (becomes protected for the recipient)
+  - Recipient gets complete character with voice and portrait
+  - Perfect for collaborative worldbuilding
 - **Voice Selection**: Regenerate or manually select from 100+ voices
 - **Image Regeneration**: Create new character portraits anytime
 - **Field Regeneration**: Use AI to regenerate individual character traits
@@ -190,7 +212,10 @@ npc_assistant/
 
 - API keys secured in Netlify Functions (never exposed to client)
 - User authentication required for all operations
-- Firestore rules enforce user data isolation
+- Firestore rules enforce user data isolation:
+  - Personal NPCs stored in `users/{userId}/npcs`
+  - Shared NPCs stored in `users/{userId}/shared_npcs`
+  - Each user can only access their own collections
 - Environment variables for sensitive configuration
 - Cloudinary secure image uploads
 
