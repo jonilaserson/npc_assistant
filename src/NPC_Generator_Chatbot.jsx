@@ -1827,7 +1827,7 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
     const [startingSceneText, setStartingSceneText] = useState('');
     const [isGeneratingScene, setIsGeneratingScene] = useState(false);
     const [isSceneWizardOpen, setIsSceneWizardOpen] = useState(false);
-    const [isEditingSceneField, setIsEditingSceneField] = useState(false);
+    const [isEditingScene, setIsEditingScene] = useState(false); // Unified for both mobile and desktop
 
     // Goal Tracking State
     const [currentSceneGoal, setCurrentSceneGoal] = useState(null);
@@ -1846,7 +1846,7 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
         setStartingSceneText(sceneCache.current[npc.id] || '');
         setIsSceneWizardOpen(false);
         setIsGeneratingScene(false);
-        setIsEditingSceneField(false);
+        setIsEditingScene(false);
 
         const chats = npc.chats || [];
         setChatHistory(chats);
@@ -2408,6 +2408,7 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
 
     const handleOpenSceneWizard = () => {
         setIsSceneWizardOpen(true);
+        setIsEditingScene(false); // Reset mobile editing state
         // Check cache first
         if (sceneCache.current[npc.id]) {
             setStartingSceneText(sceneCache.current[npc.id]);
@@ -2418,6 +2419,12 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
 
     const handleCancelScene = () => {
         setIsSceneWizardOpen(false);
+        setIsEditingScene(false); // Reset mobile editing state
+    };
+
+    const handleSkipScene = () => {
+        setIsSceneWizardOpen(false);
+        setIsEditingScene(false);
     };
 
     /**
@@ -2435,6 +2442,7 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
 
     const handleGenerateStartingScene = async () => {
         setIsGeneratingScene(true);
+        setIsEditingScene(false); // Reset mobile editing state when regenerating
         try {
             const scene = await fetchStartingScene();
             setStartingSceneText(scene);
@@ -2489,6 +2497,7 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
         const newHistory = [...chatHistory, sceneMsg];
         setChatHistory(newHistory);
         setIsSceneWizardOpen(false);
+        setIsEditingScene(false); // Reset mobile editing state
 
         // Clear scene cache after adding scene to conversation
         delete sceneCache.current[npc.id];
@@ -2803,7 +2812,7 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
                                                 New Scene
                                             </h3>
                                             <div className="flex items-center gap-2">
-                                                {!isEditingSceneField && (
+                                                {!isEditingScene && (
                                                     <>
                                                         <button
                                                             onClick={handleRegenerateSceneForField}
@@ -2834,11 +2843,11 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
                                                 textClassName="min-h-[150px]"
                                                 rows={10}
                                                 stayInModeAfterRegenerate={true}
-                                                onEditStateChange={setIsEditingSceneField}
+                                                onEditStateChange={setIsEditingScene}
                                             />
                                         </div>
 
-                                        {!isEditingSceneField && (
+                                        {!isEditingScene && (
                                             <div className="p-4 bg-gray-50 border-t border-gray-100 flex justify-end items-center gap-4">
                                                 <button
                                                     onClick={handleCancelScene}
@@ -2956,8 +2965,8 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
                             onClose={handleCancelScene}
                             sceneText={startingSceneText}
                             isGenerating={isGeneratingScene}
-                            isEditing={isEditingSceneField}
-                            onEdit={setIsEditingSceneField}
+                            isEditing={isEditingScene}
+                            onEdit={setIsEditingScene}
                             onSave={handleSaveSceneEdit}
                             onRegenerate={handleRegenerateSceneForField}
                             onStartWithScene={handleStartWithScene}
@@ -3179,8 +3188,8 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
                             onClose={handleCancelScene}
                             sceneText={startingSceneText}
                             isGenerating={isGeneratingScene}
-                            isEditing={isEditingSceneField}
-                            onEdit={setIsEditingSceneField}
+                            isEditing={isEditingScene}
+                            onEdit={setIsEditingScene}
                             onSave={handleSaveSceneEdit}
                             onRegenerate={handleRegenerateSceneForField}
                             onStartWithScene={handleStartWithScene}
@@ -3214,8 +3223,8 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
                     onClose={handleCancelScene}
                     sceneText={startingSceneText}
                     isGenerating={isGeneratingScene}
-                    isEditing={isEditingSceneField}
-                    onEdit={setIsEditingSceneField}
+                    isEditing={isEditingScene}
+                    onEdit={setIsEditingScene}
                     onSave={handleSaveSceneEdit}
                     onRegenerate={handleRegenerateSceneForField}
                     onStartWithScene={handleStartWithScene}
