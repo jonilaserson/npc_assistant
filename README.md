@@ -22,6 +22,9 @@ A unique approach: First, an LLM analyzes your character and crafts the perfect 
 ### 💬 **Context-Aware Roleplay**
 NPCs stay in character across entire conversations, remembering history and reacting based on their personality, goals, and secrets. They won't reveal secrets unless tricked or forced—just like a real character.
 
+### 🎬 **Dynamic Scene System**
+Set rich, contextual scenes that guide NPC interactions. AI automatically generates atmospheric scene descriptions complete with location, time, mood, and player objectives. The system intelligently tracks scene goals and celebrates when your players achieve them—then seamlessly transitions to the next scene. Perfect for structured adventures or spontaneous roleplay.
+
 ### ✨ **AI Field Regeneration**
 Any character trait can be regenerated or expanded with AI. Personality too bland? Regenerate it. Secret too simple? Expand it. Every field is editable and AI-enhanceable.
 
@@ -160,18 +163,26 @@ npc_assistant/
 ### Conversing with NPCs
 
 1. Select an NPC from your list
-2. Type your message in the conversation panel
-3. NPC responds in character, staying true to their personality
-4. Click the speaker icon to hear their voice
-5. Enable auto-play for automatic voice responses
+2. **Set a Scene** (optional): Click "Set a Scene" to establish context with location, mood, and objectives
+3. Type your message in the conversation panel
+4. NPC responds in character, staying true to their personality and scene context
+5. Click the speaker icon to hear their voice (100+ premium voices)
+6. Enable auto-play for automatic voice responses
+7. Track scene goals—when achieved, seamlessly transition to the next scene
 
 ### GM Tools
 
 - **GM Details Panel**: View/edit personality, wants, secrets, and pitfalls
-- **Scene Control**: Set scenes visible to players or hidden (GM-only)
+- **Scene System**: 
+  - AI-generated scene descriptions with atmospheric details
+  - Automatic goal extraction and tracking from scene context
+  - "Set Next Scene" button appears when goals are achieved
+  - Seamless scene transitions that maintain conversation flow
+  - Type `/scene` anytime to set a new scene
 - **Voice Selection**: Regenerate or manually select from 100+ voices
 - **Image Regeneration**: Create new character portraits anytime
 - **Field Regeneration**: Use AI to regenerate individual character traits
+- **Mobile Optimized**: Full-featured experience on phones with responsive design
 
 ---
 
