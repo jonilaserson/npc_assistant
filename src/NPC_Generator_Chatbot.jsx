@@ -2068,7 +2068,7 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
         if (text.toLowerCase().startsWith('/scene')) {
             const sceneText = text.substring(6).trim();
             
-            // If no text after /scene, open the scene wizard
+            // If no text after /scene, open the scene modal
             if (!sceneText) {
                 setMessage('');
                 handleOpenSceneWizard();
@@ -2249,7 +2249,7 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
             setCurrentSceneGoal(null);
             setGoalAchievedForScene(null);
 
-            // Open scene wizard with the cached scene
+            // Open scene modal with the cached scene
             setIsSceneWizardOpen(true);
         } catch (e) {
             console.error("Error rolling back to scene:", e);
@@ -2404,7 +2404,7 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
     };
 
 
-    // --- Scene Wizard Logic ---
+    // --- Scene Modal Logic ---
 
     const handleOpenSceneWizard = () => {
         setIsSceneWizardOpen(true);
@@ -2418,11 +2418,6 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
     };
 
     const handleCancelScene = () => {
-        setIsSceneWizardOpen(false);
-        setIsEditingScene(false); // Reset mobile editing state
-    };
-
-    const handleSkipScene = () => {
         setIsSceneWizardOpen(false);
         setIsEditingScene(false);
     };
@@ -2442,22 +2437,7 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
 
     const handleGenerateStartingScene = async () => {
         setIsGeneratingScene(true);
-        setIsEditingScene(false); // Reset mobile editing state when regenerating
-        try {
-            const scene = await fetchStartingScene();
-            setStartingSceneText(scene);
-            // Update cache
-            sceneCache.current[npc.id] = scene;
-        } catch (e) {
-            // Error handling
-        } finally {
-            setIsGeneratingScene(false);
-        }
-    };
-
-    // Handler for regenerate scene button in header
-    const handleRegenerateSceneForField = async () => {
-        setIsGeneratingScene(true);
+        setIsEditingScene(false);
         try {
             const scene = await fetchStartingScene();
             if (scene) {
@@ -2465,7 +2445,7 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
                 sceneCache.current[npc.id] = scene;
             }
         } catch (e) {
-            console.error("Error regenerating scene:", e);
+            console.error("Error generating scene:", e);
         } finally {
             setIsGeneratingScene(false);
         }
@@ -2755,120 +2735,22 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
             {/* Chat History Container - Scrollable */}
             <div id="chat-container" className="flex-1 px-2 sm:px-6 py-6 space-y-4 overflow-y-auto bg-gray-50">
                 {chatHistory.length === 0 ? (
-                    <div 
-                        className="flex flex-col items-center justify-center h-full p-8 text-center space-y-6 animate-fade-in relative"
-                        style={{overflow: 'visible'}}
-                    >
-                        {/* 
-                            Logic:
-                            1. If NOT wizard open -> Show "Ready to Chat" + "Set a Scene" button.
-                            2. If wizard OPEN -> Show Scene Card (Loading or Text).
-                        */}
+                    <div className="flex flex-col items-center justify-center h-full p-8 text-center space-y-6 animate-fade-in">
+                        <MessageSquare className="w-16 h-16 mx-auto mb-4 text-gray-200" />
+                        <h3 className="text-xl font-bold text-gray-400 mb-2">Ready to Chat</h3>
+                        <p className="text-gray-400 mb-6">Start the conversation with {npc.name}!</p>
 
-                        {!isSceneWizardOpen ? (
-                            <div 
-                                className='animate-fade-in flex flex-col items-center'
-                                style={{width: '571px', minWidth: '571px', maxWidth: '85vw'}}
-                            >
-                                <MessageSquare className="w-16 h-16 mx-auto mb-4 text-gray-200" />
-                                <h3 className="text-xl font-bold text-gray-400 mb-2">Ready to Chat</h3>
-                                <p className="text-gray-400 mb-6">Start the conversation with {npc.name}!</p>
+                        <button
+                            onClick={handleOpenSceneWizard}
+                            className="flex items-center justify-center px-6 py-3 font-semibold transition-all duration-200 rounded-lg shadow-md focus:outline-none focus:ring-2 focus:ring-opacity-75 bg-purple-600 hover:bg-purple-700 text-white focus:ring-purple-500"
+                        >
+                            <Wand2 className="w-5 h-5 mr-2" />
+                            Set a Scene
+                        </button>
 
-                                <button
-                                    onClick={handleOpenSceneWizard}
-                                    className="flex items-center justify-center px-6 py-3 font-semibold transition-all duration-200 rounded-lg shadow-md focus:outline-none focus:ring-2 focus:ring-opacity-75 bg-purple-600 hover:bg-purple-700 text-white focus:ring-purple-500"
-                                >
-                                    <Wand2 className="w-5 h-5 mr-2" />
-                                    Set a Scene
-                                </button>
-
-                                <p className="mt-6 text-sm text-gray-400 bg-gray-100 py-1 px-3 rounded-full inline-block">
-                                    Tip: Type <code className="text-indigo-500 font-bold">/scene</code> to set a scene at any time.
-                                </p>
-                            </div>
-                        ) : (
-                            // --- SCENE WIZARD / PREVIEW ---
-                            <div 
-                                className="w-full max-w-lg bg-white rounded-xl shadow-2xl border-2 border-indigo-100 overflow-hidden relative animate-in fade-in zoom-in-95 duration-200"
-                                style={{width: '571px', minWidth: '571px', maxWidth: '85vw'}}
-                            >
-
-                                {isGeneratingScene ? (
-                                    <div className="p-12 flex flex-col items-center text-indigo-600">
-                                        <style>{magicalStyles}</style>
-                                        <div className="relative mb-4">
-                                            <Wand2 className="w-12 h-12 animate-magic" />
-                                            <Sparkles className="w-6 h-6 text-yellow-400 absolute -top-2 -right-2 animate-sparkle-1" />
-                                            <Sparkles className="w-6 h-6 text-cyan-400 absolute -bottom-2 -left-2 animate-sparkle-2" />
-                                        </div>
-                                        <h3 className="text-xl font-bold">Setting the Scene...</h3>
-                                        <p className="text-sm text-indigo-400">Consulting the Dungeon Master...</p>
-                                    </div>
-                                ) : (
-                                    <>
-                                        <div className="bg-indigo-50 p-4 border-b border-indigo-100 flex items-center justify-between">
-                                            <h3 className="font-bold text-indigo-800 flex items-center">
-                                                <Sparkles className="w-4 h-4 mr-2 text-indigo-500" />
-                                                New Scene
-                                            </h3>
-                                            <div className="flex items-center gap-2">
-                                                {!isEditingScene && (
-                                                    <>
-                                                        <button
-                                                            onClick={handleRegenerateSceneForField}
-                                                            className="p-1.5 text-purple-600 hover:bg-purple-100 rounded-lg transition-colors"
-                                                            title="Regenerate Scene"
-                                                        >
-                                                            <Wand2 className="w-4 h-4" />
-                                                        </button>
-                                                        <button
-                                                            onClick={handleCancelScene}
-                                                            className="p-1.5 text-gray-500 hover:bg-gray-200 rounded-lg transition-colors"
-                                                            title="Close"
-                                                        >
-                                                            <X className="w-4 h-4" />
-                                                        </button>
-                                                    </>
-                                                )}
-                                            </div>
-                                        </div>
-
-                                        <div className="p-4 text-left">
-                                            <EditableField
-                                                label="Scene Description"
-                                                value={startingSceneText}
-                                                onSave={handleSaveSceneEdit}
-                                                type="textarea"
-                                                hideLabel={true}
-                                                textClassName="min-h-[150px]"
-                                                rows={10}
-                                                stayInModeAfterRegenerate={true}
-                                                onEditStateChange={setIsEditingScene}
-                                            />
-                                        </div>
-
-                                        {!isEditingScene && (
-                                            <div className="p-4 bg-gray-50 border-t border-gray-100 flex justify-end items-center gap-4">
-                                                <button
-                                                    onClick={handleCancelScene}
-                                                    className="text-sm text-gray-500 hover:text-gray-700 px-4 py-2 hover:bg-gray-100 rounded-lg transition-colors font-semibold"
-                                                >
-                                                    Cancel
-                                                </button>
-                                                <button
-                                                    onClick={handleStartWithScene}
-                                                    disabled={!startingSceneText}
-                                                    className="bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-3 rounded-lg shadow-md hover:shadow-lg transition-all transform active:scale-95 font-bold flex items-center justify-center"
-                                                >
-                                                    <Zap className="w-5 h-5 mr-2 fill-current" />
-                                                    Start Scene
-                                                </button>
-                                            </div>
-                                        )}
-                                    </>
-                                )}
-                            </div>
-                        )}
+                        <p className="mt-6 text-sm text-gray-400 bg-gray-100 py-1 px-3 rounded-full inline-block">
+                            Tip: Type <code className="text-indigo-500 font-bold">/scene</code> to set a scene at any time.
+                        </p>
                     </div>
                 ) : (
                     chatHistory
@@ -2959,19 +2841,17 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
                         imageUrl={currentImageUrl}
                         altText={npc.name}
                     />
-                    {chatHistory.length > 0 && (
-                        <SceneModal
-                            isOpen={isSceneWizardOpen}
-                            onClose={handleCancelScene}
-                            sceneText={startingSceneText}
-                            isGenerating={isGeneratingScene}
-                            isEditing={isEditingScene}
-                            onEdit={setIsEditingScene}
-                            onSave={handleSaveSceneEdit}
-                            onRegenerate={handleRegenerateSceneForField}
-                            onStartWithScene={handleStartWithScene}
-                        />
-                    )}
+                    <SceneModal
+                        isOpen={isSceneWizardOpen}
+                        onClose={handleCancelScene}
+                        sceneText={startingSceneText}
+                        isGenerating={isGeneratingScene}
+                        isEditing={isEditingScene}
+                        onEdit={setIsEditingScene}
+                        onSave={handleSaveSceneEdit}
+                        onRegenerate={handleGenerateStartingScene}
+                        onStartWithScene={handleStartWithScene}
+                    />
                 </div>
             );
         } else if (mobileView === 'conversation') {
@@ -3018,109 +2898,22 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
                             {chatHistory.length === 0 ? (
                                 <div 
                                     className="flex flex-col items-center justify-center h-full p-8 text-center space-y-6 animate-fade-in"
-                                    style={{overflow: 'visible', width: '100%', maxWidth: '100%'}}
                                 >
-                                    {isGeneratingScene ? (
-                                        <div className="flex flex-col items-center text-indigo-600">
-                                            <style>{magicalStyles}</style>
-                                            <div className="relative mb-4">
-                                                <Wand2 className="w-12 h-12 animate-magic" />
-                                                <Sparkles className="w-6 h-6 text-yellow-400 absolute -top-2 -right-2 animate-sparkle-1" />
-                                                <Sparkles className="w-6 h-6 text-cyan-400 absolute -bottom-2 -left-2 animate-sparkle-2" />
-                                            </div>
-                                            <h3 className="text-xl font-bold">Setting the Scene...</h3>
-                                            <p className="text-sm text-indigo-400">Consulting the Dungeon Master...</p>
-                                        </div>
-                                    ) : startingSceneText ? (
-                                        <div 
-                                            className="bg-white rounded-xl shadow-lg border-2 border-indigo-100 overflow-hidden"
-                                            style={{width: '571px', minWidth: '571px', maxWidth: '85vw'}}
-                                        >
-                                            <div className="bg-indigo-50 p-4 border-b border-indigo-100 flex items-center justify-between">
-                                                <h3 className="font-bold text-indigo-800 flex items-center">
-                                                    <Sparkles className="w-4 h-4 mr-2 text-indigo-500" />
-                                                    New Scene
-                                                </h3>
-                                                <div className="flex space-x-2">
-                                                    {!isEditingScene ? (
-                                                        <button
-                                                            onClick={() => setIsEditingScene(true)}
-                                                            className="p-1.5 text-indigo-600 hover:bg-indigo-100 rounded-lg transition-colors"
-                                                            title="Edit Scene"
-                                                        >
-                                                            <Edit2 className="w-4 h-4" />
-                                                        </button>
-                                                    ) : (
-                                                        <button
-                                                            onClick={() => setIsEditingScene(false)}
-                                                            className="p-1.5 text-green-600 hover:bg-green-100 rounded-lg transition-colors"
-                                                            title="Save Edits"
-                                                        >
-                                                            <Check className="w-4 h-4" />
-                                                        </button>
-                                                    )}
-                                                    <button
-                                                        onClick={handleGenerateStartingScene}
-                                                        className="p-1.5 text-indigo-600 hover:bg-indigo-100 rounded-lg transition-colors"
-                                                        title="Regenerate Scene"
-                                                    >
-                                                        <RefreshCw className="w-4 h-4" />
-                                                    </button>
-                                                </div>
-                                            </div>
-                                            <div className="p-6 text-left">
-                                                {isEditingScene ? (
-                                                    <textarea
-                                                        value={startingSceneText}
-                                                        onChange={(e) => setStartingSceneText(e.target.value)}
-                                                        className="w-full h-48 p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
-                                                        style={{fontSize: '16px'}}
-                                                    />
-                                                ) : (
-                                                    <div className="prose prose-sm max-w-none text-gray-700 whitespace-pre-wrap font-medium">
-                                                        {startingSceneText}
-                                                    </div>
-                                                )}
-                                            </div>
-                                            <div className="p-4 bg-gray-50 border-t border-gray-100 flex justify-between items-center gap-4">
-                                                <button
-                                                    onClick={handleSkipScene}
-                                                    className="text-sm text-gray-500 hover:text-gray-700 px-4 py-2 hover:bg-gray-100 rounded-lg transition-colors uppercase tracking-wide font-semibold"
-                                                >
-                                                    Skip Setup
-                                                </button>
-                                                <button
-                                                    onClick={handleStartWithScene}
-                                                    disabled={isEditingScene}
-                                                    className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-3 rounded-lg shadow-md hover:shadow-lg transition-all transform active:scale-95 font-bold flex items-center justify-center"
-                                                >
-                                                    <Zap className="w-5 h-5 mr-2 fill-current" />
-                                                    Start Scene
-                                                </button>
-                                            </div>
-                                        </div>
-                                    ) : (
-                                        <div 
-                                            className='animate-fade-in flex flex-col items-center'
-                                            style={{width: '571px', minWidth: '571px', maxWidth: '100vw'}}
-                                        >
-                                            <MessageSquare className="w-16 h-16 mx-auto mb-4 text-gray-200" />
-                                            <h3 className="text-xl font-bold text-gray-400 mb-2">Ready to Chat</h3>
-                                            <p className="text-gray-400 mb-6">Start the conversation with {npc.name}!</p>
+                                    <MessageSquare className="w-16 h-16 mx-auto mb-4 text-gray-200" />
+                                    <h3 className="text-xl font-bold text-gray-400 mb-2">Ready to Chat</h3>
+                                    <p className="text-gray-400 mb-6">Start the conversation with {npc.name}!</p>
 
-                                            <button
-                                                onClick={handleOpenSceneWizard}
-                                                className="w-full max-w-xs mb-6 flex items-center justify-center px-6 py-3 font-semibold transition-all duration-200 rounded-lg shadow-md focus:outline-none focus:ring-2 focus:ring-opacity-75 bg-purple-600 hover:bg-purple-700 text-white focus:ring-purple-500"
-                                            >
-                                                <Wand2 className="w-5 h-5 mr-2" />
-                                                Set a Scene
-                                            </button>
+                                    <button
+                                        onClick={handleOpenSceneWizard}
+                                        className="w-full max-w-xs mb-6 flex items-center justify-center px-6 py-3 font-semibold transition-all duration-200 rounded-lg shadow-md focus:outline-none focus:ring-2 focus:ring-opacity-75 bg-purple-600 hover:bg-purple-700 text-white focus:ring-purple-500"
+                                    >
+                                        <Wand2 className="w-5 h-5 mr-2" />
+                                        Set a Scene
+                                    </button>
 
-                                            <p className="text-sm text-gray-400 bg-gray-100 py-1 px-3 rounded-full inline-block">
-                                                Tip: Type <code className="text-indigo-500 font-bold">/scene</code> to set a scene at any time.
-                                            </p>
-                                        </div>
-                                    )}
+                                    <p className="text-sm text-gray-400 bg-gray-100 py-1 px-3 rounded-full inline-block">
+                                        Tip: Type <code className="text-indigo-500 font-bold">/scene</code> to set a scene at any time.
+                                    </p>
                                 </div>
                             ) : (
                                 chatHistory
@@ -3182,19 +2975,17 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
                         imageUrl={currentImageUrl}
                         altText={npc.name}
                     />
-                    {chatHistory.length > 0 && (
-                        <SceneModal
-                            isOpen={isSceneWizardOpen}
-                            onClose={handleCancelScene}
-                            sceneText={startingSceneText}
-                            isGenerating={isGeneratingScene}
-                            isEditing={isEditingScene}
-                            onEdit={setIsEditingScene}
-                            onSave={handleSaveSceneEdit}
-                            onRegenerate={handleRegenerateSceneForField}
-                            onStartWithScene={handleStartWithScene}
-                        />
-                    )}
+                    <SceneModal
+                        isOpen={isSceneWizardOpen}
+                        onClose={handleCancelScene}
+                        sceneText={startingSceneText}
+                        isGenerating={isGeneratingScene}
+                        isEditing={isEditingScene}
+                        onEdit={setIsEditingScene}
+                        onSave={handleSaveSceneEdit}
+                        onRegenerate={handleGenerateStartingScene}
+                        onStartWithScene={handleStartWithScene}
+                    />
                 </div >
             );
         }
@@ -3217,19 +3008,17 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
                 imageUrl={currentImageUrl}
                 altText={npc.name}
             />
-            {chatHistory.length > 0 && (
-                <SceneModal
-                    isOpen={isSceneWizardOpen}
-                    onClose={handleCancelScene}
-                    sceneText={startingSceneText}
-                    isGenerating={isGeneratingScene}
-                    isEditing={isEditingScene}
-                    onEdit={setIsEditingScene}
-                    onSave={handleSaveSceneEdit}
-                    onRegenerate={handleRegenerateSceneForField}
-                    onStartWithScene={handleStartWithScene}
-                />
-            )}
+            <SceneModal
+                isOpen={isSceneWizardOpen}
+                onClose={handleCancelScene}
+                sceneText={startingSceneText}
+                isGenerating={isGeneratingScene}
+                isEditing={isEditingScene}
+                onEdit={setIsEditingScene}
+                onSave={handleSaveSceneEdit}
+                onRegenerate={handleGenerateStartingScene}
+                onStartWithScene={handleStartWithScene}
+            />
         </div>
     );
 };
