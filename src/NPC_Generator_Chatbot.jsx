@@ -1588,9 +1588,9 @@ const ChatBubble = ({ message, npcName, isSpeaking, onSpeakClick, onSetNextScene
                         <div className="flex justify-center mb-3">
                             <button
                                 onClick={onSetNextScene}
-                                className="flex items-center px-6 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg shadow-md hover:shadow-lg transition-all transform active:scale-95 font-semibold"
+                                className="flex items-center justify-center px-6 py-3 font-semibold transition-all duration-200 rounded-lg shadow-md focus:outline-none focus:ring-2 focus:ring-opacity-75 bg-purple-600 hover:bg-purple-700 text-white focus:ring-purple-500"
                             >
-                                <Sparkles className="w-4 h-4 mr-2" />
+                                <Wand2 className="w-5 h-5 mr-2" />
                                 Set Next Scene!
                             </button>
                         </div>
@@ -1725,9 +1725,10 @@ const SceneModal = ({
     if (!isOpen) return null;
 
     return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50" onClick={onClose}>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 px-4" onClick={onClose}>
             <div 
-                className="w-full max-w-2xl bg-white rounded-xl shadow-2xl border-2 border-indigo-100 overflow-hidden animate-in fade-in zoom-in-95 duration-200"
+                className="w-full bg-white rounded-xl shadow-2xl border-2 border-indigo-100 overflow-hidden animate-in fade-in zoom-in-95 duration-200"
+                style={{maxWidth: 'min(672px, 85vw)'}}
                 onClick={e => e.stopPropagation()}
             >
                 {isGenerating ? (
@@ -2765,9 +2766,9 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
 
                                 <button
                                     onClick={handleOpenSceneWizard}
-                                    className="flex items-center px-4 py-2 bg-indigo-50 text-indigo-600 rounded-full hover:bg-indigo-100 transition-colors font-medium border border-indigo-200 shadow-sm"
+                                    className="flex items-center justify-center px-6 py-3 font-semibold transition-all duration-200 rounded-lg shadow-md focus:outline-none focus:ring-2 focus:ring-opacity-75 bg-purple-600 hover:bg-purple-700 text-white focus:ring-purple-500"
                                 >
-                                    <Sparkles className="w-4 h-4 mr-2" />
+                                    <Wand2 className="w-5 h-5 mr-2" />
                                     Set a Scene
                                 </button>
 
@@ -3095,6 +3096,15 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
                                             <MessageSquare className="w-16 h-16 mx-auto mb-4 text-gray-200" />
                                             <h3 className="text-xl font-bold text-gray-400 mb-2">Ready to Chat</h3>
                                             <p className="text-gray-400 mb-6">Start the conversation with {npc.name}!</p>
+
+                                            <button
+                                                onClick={handleOpenSceneWizard}
+                                                className="w-full max-w-xs mb-6 flex items-center justify-center px-6 py-3 font-semibold transition-all duration-200 rounded-lg shadow-md focus:outline-none focus:ring-2 focus:ring-opacity-75 bg-purple-600 hover:bg-purple-700 text-white focus:ring-purple-500"
+                                            >
+                                                <Wand2 className="w-5 h-5 mr-2" />
+                                                Set a Scene
+                                            </button>
+
                                             <p className="text-sm text-gray-400 bg-gray-100 py-1 px-3 rounded-full inline-block">
                                                 Tip: Type <code className="text-indigo-500 font-bold">/scene</code> to set a scene at any time.
                                             </p>
