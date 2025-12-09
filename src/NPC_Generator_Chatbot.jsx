@@ -1032,6 +1032,13 @@ const textToSpeech = async (text, structuredData) => {
 const NPC_COLLECTION_NAME = 'npcs';
 const npcCollectionPath = (appId, userId) => `users/${userId}/${NPC_COLLECTION_NAME}`;
 
+// Tips to show in rotation
+const TIPS = [
+    { text: 'Type', code: '/scene', suffix: 'to set a scene at any time' },
+    { text: 'Describe your character\'s actions using square brackets', code: '[like this]', suffix: '' },
+    { text: 'Try asking the NPC to', code: '[Describe your thoughts]', suffix: '— you might be surprised!' },
+];
+
 
 
 function useNPCs(db, userId, isAuthReady) {
@@ -1542,7 +1549,7 @@ const NpcCreation = ({ db, userId, onNpcCreated }) => {
 
 // --- Chat Interface Components ---
 
-const ChatBubble = ({ message, npcName, isSpeaking, onSpeakClick, onSetNextScene, onRollbackToScene, showGoalButtons }) => {
+const ChatBubble = ({ message, npcName, isSpeaking, onSpeakClick, onSetNextScene, onRollbackToScene, showGoalButtons, currentTip }) => {
     const isNpc = message.role === 'npc';
     const isScene = message.role === 'scene';
     const isGoalAchieved = message.role === 'goal_achieved';
@@ -1596,9 +1603,11 @@ const ChatBubble = ({ message, npcName, isSpeaking, onSpeakClick, onSetNextScene
                             </button>
                         </div>
                     )}
-                    <p className="text-xs text-gray-600 bg-white bg-opacity-60 py-1 px-3 rounded-full inline-block">
-                        Tip: you can always type <code className="text-indigo-600 font-bold">/scene</code> to switch to a new scene
-                    </p>
+                    {currentTip && (
+                        <p className="text-xs text-gray-600 bg-white bg-opacity-60 py-1 px-3 rounded-full inline-block">
+                            Tip: {currentTip.text} <code className="text-indigo-600 font-bold">{currentTip.code}</code>{currentTip.suffix && ` ${currentTip.suffix}`}
+                        </p>
+                    )}
                 </div>
             </div>
         );
@@ -1810,7 +1819,7 @@ const SceneModal = ({
     );
 };
 
-const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileView = 'details', onShowConversation, onShowDetails }) => {
+const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileView = 'details', onShowConversation, onShowDetails, currentTip }) => {
     const [message, setMessage] = useState('');
     const [chatHistory, setChatHistory] = useState(npc.chats || []);
     const [isThinking, setIsThinking] = useState(false);
@@ -2748,9 +2757,11 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
                             Set a Scene
                         </button>
 
-                        <p className="mt-6 text-sm text-gray-400 bg-gray-100 py-1 px-3 rounded-full inline-block">
-                            Tip: Type <code className="text-indigo-500 font-bold">/scene</code> to set a scene at any time.
-                        </p>
+                        {currentTip && (
+                            <p className="mt-6 text-sm text-gray-400 bg-gray-100 py-1 px-3 rounded-full inline-block">
+                                Tip: {currentTip.text} <code className="text-indigo-500 font-bold">{currentTip.code}</code>{currentTip.suffix && ` ${currentTip.suffix}`}
+                            </p>
+                        )}
                     </div>
                 ) : (
                     chatHistory
@@ -2769,6 +2780,7 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
                                     onSetNextScene={handleOpenSceneWizard}
                                     onRollbackToScene={() => handleRollbackToScene(index)}
                                     showGoalButtons={showGoalButtons}
+                                    currentTip={currentTip}
                                 />
                             );
                         })
@@ -2911,9 +2923,11 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
                                         Set a Scene
                                     </button>
 
-                                    <p className="text-sm text-gray-400 bg-gray-100 py-1 px-3 rounded-full inline-block">
-                                        Tip: Type <code className="text-indigo-500 font-bold">/scene</code> to set a scene at any time.
-                                    </p>
+                                    {currentTip && (
+                                        <p className="text-sm text-gray-400 bg-gray-100 py-1 px-3 rounded-full inline-block">
+                                            Tip: {currentTip.text} <code className="text-indigo-500 font-bold">{currentTip.code}</code>{currentTip.suffix && ` ${currentTip.suffix}`}
+                                        </p>
+                                    )}
                                 </div>
                             ) : (
                                 chatHistory
@@ -2932,6 +2946,7 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
                                                 onSetNextScene={handleOpenSceneWizard}
                                                 onRollbackToScene={() => handleRollbackToScene(index)}
                                                 showGoalButtons={showGoalButtons}
+                                                currentTip={currentTip}
                                             />
                                         );
                                     })
@@ -3431,6 +3446,9 @@ const NPCGeneratorChatbot = ({ user, impersonatedUserId, onShowAdmin }) => {
     const [isMobile, setIsMobile] = useState(false);
     const [mobileView, setMobileView] = useState('list'); // 'list', 'details', 'conversation'
 
+    // Tip rotation state - changes when entering a new NPC with empty chat
+    const [currentTipIndex, setCurrentTipIndex] = useState(0);
+
     // Detect mobile screen size
     useEffect(() => {
         const mediaQuery = window.matchMedia('(max-width: 768px)');
@@ -3450,6 +3468,14 @@ const NPCGeneratorChatbot = ({ user, impersonatedUserId, onShowAdmin }) => {
         mediaQuery.addEventListener('change', handleMediaChange);
         return () => mediaQuery.removeEventListener('change', handleMediaChange);
     }, []);
+
+    // Change tip when entering an NPC with empty discussion
+    useEffect(() => {
+        if (selectedNpc && (!selectedNpc.chats || selectedNpc.chats.length === 0)) {
+            // Cycle to next tip when entering an NPC with empty chat
+            setCurrentTipIndex((prevIndex) => (prevIndex + 1) % TIPS.length);
+        }
+    }, [selectedNpcId]);
 
     // Derive the selected NPC object from the live list
     const selectedNpc = useMemo(() => {
@@ -3538,8 +3564,8 @@ const NPCGeneratorChatbot = ({ user, impersonatedUserId, onShowAdmin }) => {
                 isMobile={isMobile}
                 mobileView={mobileView}
                 onShowConversation={handleShowConversation}
-
                 onShowDetails={handleShowDetails}
+                currentTip={TIPS[currentTipIndex]}
             />
         );
     } else if (showCreateForm) {
