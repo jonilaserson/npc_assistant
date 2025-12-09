@@ -22,7 +22,14 @@ export default async (req, context) => {
         });
 
         const data = await response.json();
+        
+        // Log the response for debugging
+        if (!response.ok || data.error) {
+            console.error("Gemini API Error Response:", JSON.stringify(data, null, 2));
+        }
+        
         return new Response(JSON.stringify(data), {
+            status: response.status,
             headers: { "Content-Type": "application/json" }
         });
 

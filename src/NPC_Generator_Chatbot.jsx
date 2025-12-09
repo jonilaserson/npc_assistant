@@ -153,7 +153,24 @@ const fetchWithBackoff = async (url, options, retries = 5) => {
     for (let i = 0; i < retries; i++) {
         try {
             const response = await fetch(url, options);
+            
+            // For Gemini API, we need to check the response body for errors
+            // rather than just the HTTP status, since it returns 200 with error in body sometimes
             if (!response.ok) {
+                // Special handling for 503 (Service Unavailable) - should retry
+                if (response.status === 503) {
+                    if (i === retries - 1) {
+                        // Last retry, return the response so caller can handle the error
+                        return response;
+                    }
+                    // Otherwise retry with backoff
+                    const delay = Math.pow(2, i) * 1000 + Math.random() * 1000;
+                    console.log(`Service unavailable (503), retrying in ${Math.round(delay)}ms... (attempt ${i + 1}/${retries})`);
+                    await new Promise(resolve => setTimeout(resolve, delay));
+                    continue;
+                }
+                
+                // For other non-ok responses, check if we should retry
                 let errorBody;
                 try {
                     errorBody = await response.text();
@@ -173,6 +190,7 @@ const fetchWithBackoff = async (url, options, retries = 5) => {
 
             if (i === retries - 1) throw error;
             const delay = Math.pow(2, i) * 1000 + Math.random() * 1000;
+            console.log(`Request failed, retrying in ${Math.round(delay)}ms... (attempt ${i + 1}/${retries})`);
             await new Promise(resolve => setTimeout(resolve, delay));
         }
     }
@@ -404,9 +422,11 @@ const generateScene = async (npcData, conversationHistory = null) => {
     Requirements:
     - Keep all three sections short (max 1 sentence each).
     - Separate the three sections (Setting, Context, Goal) with an empty line between them.
-    ${conversationHistory && conversationHistory.length > 0 ? '- The new scene should take place some time after the events in the conversation so far, and offer a fresh, *new* direction or development for the Goal as well. A short time skip is acceptable.' : ''}
+    ${conversationHistory && conversationHistory.length > 0 ? '- The new scene should take place some time after the events in the conversation so far, and offer a fresh, *new* direction or development. The goal should also be a different type of challenge from the previous scene. A reasonable time skip is acceptable.' : ''}
     - Make the Goal be something the NPC could provide or assist with, but requires some effort or convincing from the user.
+    - Note that the user's goal is a secret not known to the NPC.
     - Do not use markdown bolding in the output logic, just plain text headers are fine.
+    - Refer to the user's character as "your character".
     `;
 
     const payload = {
@@ -595,8 +615,37 @@ const getNPCResponse = async (structuredData, chatHistory, currentGoal = null) =
             body: JSON.stringify(payload)
         });
         const result = await response.json();
+        
+        // Log the full response for debugging
+        console.log("Gemini API response:", result);
+        
+        // Check for API error
+        if (result.error) {
+            console.error("Gemini API error:", result.error);
+            
+            // Handle 503 (overloaded) specifically
+            if (result.error.code === 503 || result.error.status === "UNAVAILABLE") {
+                throw new Error("The service is currently overloaded. Please wait a moment and try again.");
+            }
+            
+            // Generic error - don't expose technical details
+            console.error("Full error details:", result.error);
+            throw new Error("Unable to get a response right now. Please try again.");
+        }
+        
+        // Check if content was blocked
+        if (result.candidates?.[0]?.finishReason === 'SAFETY' || 
+            result.candidates?.[0]?.finishReason === 'RECITATION' ||
+            result.candidates?.[0]?.finishReason === 'OTHER') {
+            console.error("Content blocked by safety filters:", result.candidates[0]);
+            throw new Error("Content blocked. Try rephrasing your message.");
+        }
+        
         let text = result.candidates?.[0]?.content?.parts?.[0]?.text;
-        if (!text) throw new Error("Model returned no text response.");
+        if (!text) {
+            console.error("No text in response. Full result:", JSON.stringify(result, null, 2));
+            throw new Error("No response was generated. Please try rephrasing your message.");
+        }
         
         // If we're tracking a goal, look for the hidden marker
         if (currentGoal) {
@@ -622,7 +671,11 @@ const getNPCResponse = async (structuredData, chatHistory, currentGoal = null) =
         return text;
     } catch (e) {
         console.error("Error getting NPC response:", e);
-        throw new Error("Failed to get response. Check console for details.");
+        // Re-throw user-friendly errors, or provide a generic message
+        if (e.message && !e.message.includes('API') && !e.message.includes('console')) {
+            throw e;
+        }
+        throw new Error("Unable to get a response. Please try again.");
     }
 };
 
@@ -1036,7 +1089,7 @@ const npcCollectionPath = (appId, userId) => `users/${userId}/${NPC_COLLECTION_N
 const TIPS = [
     { text: 'Type', code: '/scene', suffix: 'to set a scene at any time' },
     { text: 'Describe your character\'s actions using square brackets', code: '[like this]', suffix: '' },
-    { text: 'Try asking the NPC to', code: '[Describe your thoughts]', suffix: '— you might be surprised!' },
+    { text: 'Try typing', code: '[Describe the NPC\'s internal monologue]', suffix: '— you might be surprised!' },
 ];
 
 
@@ -1580,7 +1633,7 @@ const ChatBubble = ({ message, npcName, isSpeaking, onSpeakClick, onSetNextScene
     if (isGoalAchieved) {
         return (
             <div className="flex w-full justify-center my-4">
-                <div className="w-[80%] max-w-lg p-6 rounded-lg shadow-lg text-center border-2 bg-gradient-to-br from-yellow-50 to-amber-50 border-yellow-400 animate-in fade-in zoom-in-95 duration-300">
+                <div className="w-[80%] max-w-lg p-6 rounded-lg shadow-lg text-center border-2 bg-gradient-to-br from-yellow-50 to-amber-50 border-yellow-400 animate-in fade-in zoom-in-95 duration-300 relative">
                     <div className="flex items-center justify-center mb-3">
                         <div className="w-12 h-12 rounded-full bg-yellow-400 flex items-center justify-center animate-bounce">
                             <span className="text-2xl">🎉</span>
@@ -1608,6 +1661,13 @@ const ChatBubble = ({ message, npcName, isSpeaking, onSpeakClick, onSetNextScene
                             Tip: {currentTip.text} <code className="text-indigo-600 font-bold">{currentTip.code}</code>{currentTip.suffix && ` ${currentTip.suffix}`}
                         </p>
                     )}
+                    <button
+                        onClick={onRollbackToScene}
+                        className="absolute bottom-2 right-2 p-1.5 text-yellow-600 hover:text-yellow-800 hover:bg-yellow-100 rounded-full transition-colors"
+                        title="Rollback to this point"
+                    >
+                        <RotateCcw className="w-4 h-4" />
+                    </button>
                 </div>
             </div>
         );
@@ -2222,7 +2282,17 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
             setChatHistory(prev => prev.slice(0, prev.length - 1));
             // Restore the message so the user doesn't have to retype it
             setMessage(text);
-            console.error("Failed to get NPC response or save chat. See console for details.");
+            
+            // Show user-friendly error message
+            let errorMessage = `${npc.name} couldn't respond right now.\n\n`;
+            if (e.message && e.message.includes("overloaded")) {
+                errorMessage += "⏳ The service is currently busy. Please wait 10-30 seconds and try again.\n\nYour message has been restored so you can easily resend it.";
+            } else if (e.message && e.message.includes("Content blocked")) {
+                errorMessage += "Your message may have triggered content filters. Try rephrasing it.";
+            } else {
+                errorMessage += "Something went wrong. Please try again in a moment.\n\nYour message has been restored.";
+            }
+            alert(errorMessage);
         } finally {
             setIsThinking(false);
             // Refocus the message input after response is complete
@@ -2233,20 +2303,35 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
     };
 
     const handleRollbackToScene = async (sceneIndex) => {
-        const scene = chatHistory[sceneIndex];
-        if (!scene || scene.role !== 'scene') return;
+        const message = chatHistory[sceneIndex];
+        if (!message || (message.role !== 'scene' && message.role !== 'goal_achieved')) return;
 
-        if (!confirm("Rollback to this scene? This will clear all conversation from this point forward.")) return;
+        if (!confirm("Rollback to this point? This will clear all conversation from this point forward.")) return;
 
         try {
-            // Save the scene to cache
-            sceneCache.current[npc.id] = scene.text;
-            setStartingSceneText(scene.text);
+            const isGoalAchieved = message.role === 'goal_achieved';
+            let newHistory;
+            
+            if (isGoalAchieved) {
+                // For goal_achieved: keep the goal_achieved message, remove everything after it
+                newHistory = chatHistory.slice(0, sceneIndex + 1);
+                // Clear scene cache so next scene will be freshly generated
+                delete sceneCache.current[npc.id];
+                setStartingSceneText('');
+            } else {
+                // For scene: remove the scene and everything after it, but save scene to cache
+                newHistory = chatHistory.slice(0, sceneIndex);
+                sceneCache.current[npc.id] = message.text;
+                setStartingSceneText(message.text);
+                // Open scene modal with the cached scene
+                setIsSceneWizardOpen(true);
+            }
 
-            // Clear conversation from this scene forward (including the scene itself)
-            const newHistory = chatHistory.slice(0, sceneIndex);
+            // Reset goal tracking state (common to both)
+            setCurrentSceneGoal(null);
+            setGoalAchievedForScene(null);
 
-            // Update Firestore
+            // Update Firestore (common to both)
             const npcRef = doc(db, npcCollectionPath(appId, userId), npc.id);
             await updateDoc(npcRef, {
                 chats: newHistory,
@@ -2254,14 +2339,8 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
             });
             setChatHistory(newHistory);
 
-            // Reset goal tracking state
-            setCurrentSceneGoal(null);
-            setGoalAchievedForScene(null);
-
-            // Open scene modal with the cached scene
-            setIsSceneWizardOpen(true);
         } catch (e) {
-            console.error("Error rolling back to scene:", e);
+            console.error("Error rolling back:", e);
         }
     };
 
