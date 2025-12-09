@@ -1257,7 +1257,8 @@ const EditableField = ({ label, value, displayValue, onSave, onRegenerate, onExp
                             value={tempValue}
                             onChange={(e) => setTempValue(e.target.value)}
                             onKeyDown={handleKeyDown}
-                            className="flex-1 p-2 border border-gray-300 rounded focus:ring-indigo-500 focus:border-indigo-500 text-sm resize-none"
+                            className="flex-1 p-2 border border-gray-300 rounded focus:ring-indigo-500 focus:border-indigo-500 resize-none"
+                            style={{fontSize: '16px'}}
                             rows={rows}
                             autoFocus
                         />
@@ -3021,7 +3022,7 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
                                             <h3 className="text-xl font-bold">Setting the Scene...</h3>
                                             <p className="text-sm text-indigo-400">Consulting the Dungeon Master...</p>
                                         </div>
-                                    ) : startingSceneText && !sceneSkipped ? (
+                                    ) : startingSceneText ? (
                                         <div 
                                             className="bg-white rounded-xl shadow-lg border-2 border-indigo-100 overflow-hidden"
                                             style={{width: '571px', minWidth: '571px', maxWidth: '85vw'}}
@@ -3063,7 +3064,8 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
                                                     <textarea
                                                         value={startingSceneText}
                                                         onChange={(e) => setStartingSceneText(e.target.value)}
-                                                        className="w-full h-48 p-3 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                                                        className="w-full h-48 p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                                                        style={{fontSize: '16px'}}
                                                     />
                                                 ) : (
                                                     <div className="prose prose-sm max-w-none text-gray-700 whitespace-pre-wrap font-medium">
