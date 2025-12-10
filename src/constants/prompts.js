@@ -106,7 +106,6 @@ export const getSceneGenerationPrompt = (npcData, conversationHistory = null) =>
     - Separate the three sections (Setting, Context, Goal) with an empty line between them.
     ${conversationHistory && conversationHistory.length > 0 ? '- The new scene should take place some time after the events in the conversation so far, and offer a fresh, *new* direction or development. The goal should also be a different type of challenge from the previous scene. A reasonable time skip is acceptable.' : ''}
     - Make the Goal be something the NPC could provide or assist with, but requires some effort or convincing from the user.
-    - Note that the user's goal is a secret not known to the NPC.
     - Do not use markdown bolding in the output logic, just plain text headers are fine.
     - Refer to the user's character as "your character".
     `;
@@ -154,7 +153,7 @@ export const getRoleplaySystemPrompt = (structuredData, currentGoal = null) => {
         - **Secret:** ${structuredData.secrets}
         
         Stay in character and base your responses on the provided information. Do not break character. Do not reveal your secrets unless explicitly forced or tricked, or you think it would benefit the NPC to reveal it.
-        Start the conversation with a good level of patience and interest to hear the user out, and adjust them in response to the user's actions and words.
+        The NPC should start with a GOOD level of patience and interest to hear the user out, and adjust their behavior in response to the user's actions and words.
         
         ***CRITICAL: Keep responses SHORT and natural.*** Respond with 1-3 sentences maximum unless the character is explicitly described as verbose or chatty. Speak like a real person in conversation, not like you're writing a story.
         
@@ -164,9 +163,10 @@ export const getRoleplaySystemPrompt = (structuredData, currentGoal = null) => {
     if (currentGoal) {
         systemPrompt += `\n\n***HIDDEN GOAL TRACKING (DO NOT MENTION THIS TO USER):***
         The user has a scene goal: "${currentGoal}"
+        Note that the user's goal is not known in advance to the NPC. The NPC only knows what the user says or does in character.
         
         After your in-character response, add a hidden marker on a new line:
-        - If the user achieved the goal (you agreed to help, provided what they needed, gave important information, established a path forward, or showed willingness to cooperate), add: ###GOAL_ACHIEVED###
+        - If the user achieved the goal (they got you to do what they wanted you to do according to the goal), add: ###GOAL_ACHIEVED###
         - Otherwise, add: ###GOAL_NOT_ACHIEVED###
         
         The user will NOT see this marker - it's only for system tracking. Your actual response must be purely in-character.`;
