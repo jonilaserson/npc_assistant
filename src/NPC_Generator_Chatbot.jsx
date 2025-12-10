@@ -1,5 +1,17 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { onAuthStateChanged, signInAnonymously, signInWithCustomToken } from 'firebase/auth';
+import {
+    TIPS,
+    getStructuredNPCPrompt,
+    getSceneGenerationPrompt,
+    getImageGenerationPrompt,
+    getImageSystemInstruction,
+    getImageFallbackPrompt,
+    getRoleplaySystemPrompt,
+    getFieldRegenerationPrompt,
+    getFieldExpansionPrompt,
+    getVoiceRegenerationPrompt
+} from './constants/prompts';
 import { collection, deleteDoc, doc, getDocs, onSnapshot, orderBy, query, setDoc, updateDoc, where } from 'firebase/firestore';
 import { getDownloadURL, ref, uploadString } from 'firebase/storage';
 import { auth, db, storage } from './firebaseConfig';
@@ -153,7 +165,7 @@ const fetchWithBackoff = async (url, options, retries = 5) => {
     for (let i = 0; i < retries; i++) {
         try {
             const response = await fetch(url, options);
-            
+
             // For Gemini API, we need to check the response body for errors
             // rather than just the HTTP status, since it returns 200 with error in body sometimes
             if (!response.ok) {
@@ -169,7 +181,7 @@ const fetchWithBackoff = async (url, options, retries = 5) => {
                     await new Promise(resolve => setTimeout(resolve, delay));
                     continue;
                 }
-                
+
                 // For other non-ok responses, check if we should retry
                 let errorBody;
                 try {
@@ -196,37 +208,7 @@ const fetchWithBackoff = async (url, options, retries = 5) => {
     }
 };
 
-// --- Shared Voice Selection Guidelines ---
 
-const VOICE_SELECTION_GUIDELINES = `Voice Selection Guidelines:
-Match the voice to the character by considering:
-
-1. GENDER: Choose a voice that matches the character's gender
-
-2. AGE: Match voice maturity to character age
-   - Young/Child → Young, Youthful voices
-   - Young Adult → Adult voices with energetic qualities
-   - Adult/Middle-aged → Adult, Mature voices
-   - Old/Elderly → Mature, Wise, Deep voices
-
-3. PERSONALITY & DEMEANOR: Match voice qualities to character traits
-   - Friendly/Warm/Kind → Friendly, Warm, Engaging, Approachable
-   - Authoritative/Leader/Noble → Authoritative, Confident, Professional, Powerful
-   - Wise/Scholarly/Calm → Thoughtful, Wise, Calm, Intelligent
-   - Energetic/Enthusiastic/Cheerful → Energetic, Bright, Enthusiastic, Upbeat
-   - Mysterious/Cool/Edgy → Deep, Cool, Distinctive, Gravitas
-   - Professional/Formal → Professional, Articulate, Composed
-   - Casual/Relaxed → Casual, Conversational, Relatable
-   - Gruff/Tough/Serious → Deep, Resonant, Serious, Powerful
-
-Examples:
-- Old male wizard (wise, authoritative) → Autonoe or Orus
-- Young energetic female bard → Pulcherrima or Kore
-- Gruff male warrior → Sadachbia or Zubenelgenubi
-- Friendly female shopkeeper → Despina or Aoede
-- Mysterious male rogue → Sadachbia or Charon
-- Noble female leader → Leda or Algenib
-- Enthusiastic young male adventurer → Enceladus or Alnilam`;
 
 
 
@@ -294,23 +276,14 @@ const generateStructuredNPC = async (description) => {
         throw new Error("Configuration Error: AVAILABLE_VOICES list is missing or empty.");
     }
 
-    const userQuery = `Convert the following raw description into a structured NPC profile suitable for a Dungeons and Dragons style setting. Focus only on the content and adhere strictly to the provided JSON schema. If the user hasn't provided a name, make up a suitable name for the NPC. Raw Description: "${description}"`;
+    const { userQuery, systemPrompt } = getStructuredNPCPrompt(description, AVAILABLE_VOICES);
 
     const payload = {
         contents: [{ parts: [{ text: userQuery }] }],
         systemInstruction: {
             parts: [{
-                text: `You are a professional RPG game assistant. Your task is to analyze the provided text and output a complete JSON object based on the schema.
-
-            CRITICAL: You must select the most appropriate voice for this character from the following list of available voices.
-
-            Available Voices:
-            ${AVAILABLE_VOICES.join("\n")}
-
-            ${VOICE_SELECTION_GUIDELINES}
-            
-            IMPORTANT: Select your TOP 3 best matching voices.
-            Return them as a list in the 'voiceCandidates' field.` }]
+                text: systemPrompt
+            }]
         },
         generationConfig: {
             responseMimeType: "application/json",
@@ -374,60 +347,7 @@ const generateStructuredNPC = async (description) => {
  * If conversationHistory is provided, the scene will build on the conversation.
  */
 const generateScene = async (npcData, conversationHistory = null) => {
-    // Build conversation history section if available
-    let conversationSection = '';
-    if (conversationHistory && conversationHistory.length > 0) {
-        // Find the most recent scene
-        let previousSceneText = '';
-        for (let i = conversationHistory.length - 1; i >= 0; i--) {
-            if (conversationHistory[i].role === 'scene') {
-                previousSceneText = conversationHistory[i].text;
-                break;
-            }
-        }
-        
-        // Get last 10 messages (should cover ~5 per side), excluding scene messages
-        const recentMessages = conversationHistory.slice(-10)
-            .filter(msg => msg.role !== 'scene') // Exclude scenes since we show previous scene separately
-            .map(msg => {
-                if (msg.role === 'user') return `User: ${msg.text}`;
-                if (msg.role === 'npc' || msg.role === 'assistant') return `${npcData.name}: ${msg.text}`;
-                return '';
-            })
-            .filter(m => m)
-            .join('\n');
-        
-        conversationSection = `
-    ${previousSceneText ? `Previous Scene:
-    ${previousSceneText}
-    
-    ` : ''}Recent Conversation (last ~5 exchanges):
-    ${recentMessages}
-    `;
-    }
-    
-    const systemPrompt = `You are a creative Dungeon Master helper. Your task is to generate a concise scene for a roleplay conversation with the following NPC.
-    
-    NPC: ${npcData.name} (${npcData.raceClass})
-    Personality: ${npcData.personality}
-    Principal Desire/Want: ${npcData.wants}${conversationSection}
-    
-    Output Format:
-    Setting: [Where the scene takes place, time of day if relevant${conversationHistory && conversationHistory.length > 0 ? ', and how much time passed since the previous scene if there was a time skip' : ''}. May include brief atmospheric details like weather, sounds, or smells if relevant]
-
-    Context: [What the NPC is doing and how the User encountered them, or the development that arised in the conclusion of the previous scene]
-
-    Goal: [A specific objective for the User to achieve in this conversation scene]
-    
-    Requirements:
-    - Keep all three sections short (max 1 sentence each).
-    - Separate the three sections (Setting, Context, Goal) with an empty line between them.
-    ${conversationHistory && conversationHistory.length > 0 ? '- The new scene should take place some time after the events in the conversation so far, and offer a fresh, *new* direction or development. The goal should also be a different type of challenge from the previous scene. A reasonable time skip is acceptable.' : ''}
-    - Make the Goal be something the NPC could provide or assist with, but requires some effort or convincing from the user.
-    - Note that the user's goal is a secret not known to the NPC.
-    - Do not use markdown bolding in the output logic, just plain text headers are fine.
-    - Refer to the user's character as "your character".
-    `;
+    const systemPrompt = getSceneGenerationPrompt(npcData, conversationHistory);
 
     const payload = {
         contents: [{ parts: [{ text: "Generate a scene." }] }],
@@ -461,32 +381,13 @@ const generateNPCImage = async (name, raceClass, visualDescription, gender, ageR
     // Step 1: Ask the LLM to act as a DALL-E artist and create the perfect prompt
     console.log(`\n%c[NPC Generator] Step 1: Asking LLM to create optimized DALL-E prompt...`, 'color: magenta; font-weight: bold;');
 
-    const promptCreationQuery = `You are now working as a professional DALL-E artist, who knows all the little tricks to make the perfect image. Your task is to create the PERFECT prompt that will encapsulate this NPC the best for DALL-E image generation.
-
-Character Information:
-- Name: ${name}
-- Race/Class: ${raceClass}
-- Gender: ${gender}
-- Age Range: ${ageRange}
-- Visual Description: ${visualDescription || 'Not provided'}
-- Personality: ${personality}
-
-Create a detailed, vivid DALL-E prompt that will generate a portrait that perfectly captures this character. The prompt should:
-1. Focus on visual details that bring the character to life
-2. Include appropriate art style directions (Dungeons and Dragons fantasy art, dramatic lighting, professional illustration)
-3. Ensure the character is centered and fills the frame
-4. Incorporate personality traits into visual cues where appropriate
-5. Be specific about physical appearance, clothing, equipment, and atmosphere
-6. Use the following style: Dungeons and Dragons fantasy art, dramatic lighting, professional illustration
-7. The resulting should be an image without any textual labels or overlays other than a single portrait of the character.
-8. CRITICAL: The generated prompt MUST be less than 700 characters in length.
-Respond with ONLY the prompt text, nothing else.`;
+    const promptCreationQuery = getImageGenerationPrompt(name, raceClass, visualDescription, gender, ageRange, personality);
 
     const promptPayload = {
         contents: [{ parts: [{ text: promptCreationQuery }] }],
         systemInstruction: {
             parts: [{
-                text: `You are an expert DALL-E prompt engineer specializing in fantasy character art. Your task is to create the most effective prompt possible to generate a stunning character portrait. Be specific, vivid, and focus on visual details that will translate well to image generation.`
+                text: getImageSystemInstruction()
             }]
         }
     };
@@ -506,12 +407,12 @@ Respond with ONLY the prompt text, nothing else.`;
         if (!optimizedPrompt) {
             console.warn("Could not generate optimized prompt, falling back to basic prompt");
             const description = (visualDescription && visualDescription.trim()) ? visualDescription : personality;
-            optimizedPrompt = `Create a portrait of ${name}, a ${gender} ${ageRange} ${raceClass}. ${description || ''} The character should be centered and fill the frame. Style: Dungeons and Dragons fantasy art, dramatic lighting, professional illustration.`;
+            optimizedPrompt = getImageFallbackPrompt(name, gender, ageRange, raceClass, description);
         }
     } catch (e) {
         console.warn("Error generating optimized prompt, using fallback:", e);
         const description = (visualDescription && visualDescription.trim()) ? visualDescription : personality;
-        optimizedPrompt = `Create a portrait of ${name}, a ${gender} ${ageRange} ${raceClass}. ${description || ''} The character should be centered and fill the frame. Style: Dungeons and Dragons fantasy art, dramatic lighting, professional illustration.`;
+        optimizedPrompt = getImageFallbackPrompt(name, gender, ageRange, raceClass, description);
     }
 
     console.log(`\n%c[NPC Generator] Optimized DALL-E Prompt:`, 'color: cyan; font-weight: bold;');
@@ -569,31 +470,7 @@ Respond with ONLY the prompt text, nothing else.`;
  * Returns: string (if no goal) or { response: string, goalAchieved: boolean } (if goal provided)
  */
 const getNPCResponse = async (structuredData, chatHistory, currentGoal = null) => {
-    let systemPrompt = `You are roleplaying as the NPC named ${structuredData.name}.
-        - **Race/Class:** ${structuredData.raceClass}
-        - **Gender/Age:** ${structuredData.gender} ${structuredData.ageRange}
-        - **Personality:** ${structuredData.personality}
-        - **Wants:** ${structuredData.wants}
-        - **Secret:** ${structuredData.secrets}
-        
-        Stay in character and base your responses on the provided information. Do not break character. Do not reveal your secrets unless explicitly forced or tricked, or you think it would benefit the NPC to reveal it.
-        Start the conversation with a good level of patience and interest to hear the user out, and adjust them in response to the user's actions and words.
-        
-        ***CRITICAL: Keep responses SHORT and natural.*** Respond with 1-3 sentences maximum unless the character is explicitly described as verbose or chatty. Speak like a real person in conversation, not like you're writing a story.
-        
-        ***IMPORTANT FORMATTING RULE:*** Enclose any actions, emotional descriptions, or narrations (i.e., anything that is NOT spoken dialogue) within square brackets, e.g., "[The ${structuredData.raceClass} clears their throat.]". Only the spoken dialogue should be outside the brackets.`;
-
-    // If we have a goal, add goal checking instructions with a hidden marker
-    if (currentGoal) {
-        systemPrompt += `\n\n***HIDDEN GOAL TRACKING (DO NOT MENTION THIS TO USER):***
-        The user has a scene goal: "${currentGoal}"
-        
-        After your in-character response, add a hidden marker on a new line:
-        - If the user achieved the goal (you agreed to help, provided what they needed, gave important information, established a path forward, or showed willingness to cooperate), add: ###GOAL_ACHIEVED###
-        - Otherwise, add: ###GOAL_NOT_ACHIEVED###
-        
-        The user will NOT see this marker - it's only for system tracking. Your actual response must be purely in-character.`;
-    }
+    let systemPrompt = getRoleplaySystemPrompt(structuredData, currentGoal);
 
     // Map chat history to the required model format
     const contents = chatHistory.map(msg => ({
@@ -615,45 +492,45 @@ const getNPCResponse = async (structuredData, chatHistory, currentGoal = null) =
             body: JSON.stringify(payload)
         });
         const result = await response.json();
-        
+
         // Log the full response for debugging
         console.log("Gemini API response:", result);
-        
+
         // Check for API error
         if (result.error) {
             console.error("Gemini API error:", result.error);
-            
+
             // Handle 503 (overloaded) specifically
             if (result.error.code === 503 || result.error.status === "UNAVAILABLE") {
                 throw new Error("The service is currently overloaded. Please wait a moment and try again.");
             }
-            
+
             // Generic error - don't expose technical details
             console.error("Full error details:", result.error);
             throw new Error("Unable to get a response right now. Please try again.");
         }
-        
+
         // Check if content was blocked
-        if (result.candidates?.[0]?.finishReason === 'SAFETY' || 
+        if (result.candidates?.[0]?.finishReason === 'SAFETY' ||
             result.candidates?.[0]?.finishReason === 'RECITATION' ||
             result.candidates?.[0]?.finishReason === 'OTHER') {
             console.error("Content blocked by safety filters:", result.candidates[0]);
             throw new Error("Content blocked. Try rephrasing your message.");
         }
-        
+
         let text = result.candidates?.[0]?.content?.parts?.[0]?.text;
         if (!text) {
             console.error("No text in response. Full result:", JSON.stringify(result, null, 2));
             throw new Error("No response was generated. Please try rephrasing your message.");
         }
-        
+
         // If we're tracking a goal, look for the hidden marker
         if (currentGoal) {
             const achievedMarker = '###GOAL_ACHIEVED###';
             const notAchievedMarker = '###GOAL_NOT_ACHIEVED###';
-            
+
             let goalAchieved = false;
-            
+
             if (text.includes(achievedMarker)) {
                 goalAchieved = true;
                 text = text.replace(achievedMarker, '').trim();
@@ -661,13 +538,13 @@ const getNPCResponse = async (structuredData, chatHistory, currentGoal = null) =
                 goalAchieved = false;
                 text = text.replace(notAchievedMarker, '').trim();
             }
-            
+
             return {
                 response: text,
                 goalAchieved: goalAchieved
             };
         }
-        
+
         return text;
     } catch (e) {
         console.error("Error getting NPC response:", e);
@@ -685,7 +562,7 @@ const getNPCResponse = async (structuredData, chatHistory, currentGoal = null) =
  */
 const parseGoalFromScene = (sceneText) => {
     if (!sceneText) return null;
-    
+
     // Look for "Goal:" followed by the goal text
     const goalMatch = sceneText.match(/Goal:\s*(.+?)(?:\n\n|\n|$)/i);
     if (goalMatch && goalMatch[1]) {
@@ -698,31 +575,7 @@ const parseGoalFromScene = (sceneText) => {
  * Regenerates a specific field of the NPC profile based on the rest of the data.
  */
 const regenerateNPCField = async (structuredData, field) => {
-    const fieldDescriptions = {
-        personality: "A concise, detailed summary of the NPC's disposition and mannerisms.",
-        wants: "The NPC's primary goal or desire.",
-        secrets: "A key secret the NPC hides, critical for plot development.",
-        pitfalls: "One thing that may make the NPC lose patience, interest, or demand a clarification in the conversation.",
-        visual: "A detailed visual description of the NPC's physical appearance, clothing, and equipment."
-    };
-
-    const targetDescription = fieldDescriptions[field] || "content for this field";
-
-    const systemPrompt = `You are an expert RPG character creator. Your task is to regenerate ONLY the '${field}' field for the following character, keeping it consistent with their other traits but providing a fresh, creative variation.
-
-    Character Context:
-    - Name: ${structuredData.name}
-    - Race/Class: ${structuredData.raceClass}
-    - Gender/Age: ${structuredData.gender} ${structuredData.ageRange}
-    ${field !== 'personality' ? `- Personality: ${structuredData.personality}` : ''}
-    ${field !== 'wants' ? `- Wants: ${structuredData.wants}` : ''}
-    ${field !== 'secrets' ? `- Secret: ${structuredData.secrets}` : ''}
-    
-    Task: Write a new, unique entry for '${field}'.
-    CRITICAL: Keep the response SHORT and CONCISE (maximum 1-2 sentences).
-    Description of this field: ${targetDescription}
-    
-    Respond with ONLY the text for the new '${field}'. Do not include labels, quotes, or explanations.`;
+    const systemPrompt = getFieldRegenerationPrompt(structuredData, field);
 
     const payload = {
         contents: [{ parts: [{ text: "Regenerate this field." }] }],
@@ -751,28 +604,7 @@ const regenerateNPCField = async (structuredData, field) => {
  * Expands a specific field of the NPC profile to be more detailed.
  */
 const expandNPCField = async (structuredData, field) => {
-    const fieldDescriptions = {
-        wants: "The NPC's primary goal or desire.",
-        secrets: "A key secret the NPC hides, critical for plot development.",
-        pitfalls: "One thing that may make the NPC lose patience, interest, or demand a clarification in the conversation."
-    };
-
-    const targetDescription = fieldDescriptions[field] || "content for this field";
-
-    const systemPrompt = `You are an expert RPG character creator. Your task is to EXPAND the '${field}' field for the following character.
-    
-    Character Context:
-    - Name: ${structuredData.name}
-    - Race/Class: ${structuredData.raceClass}
-    - Gender/Age: ${structuredData.gender} ${structuredData.ageRange}
-    ${field !== 'personality' ? `- Personality: ${structuredData.personality}` : ''}
-    
-    Current '${field}': "${structuredData[field]}"
-    
-    Task: Expand and/or add one more *short* sentence to the '${field}' entry. Otherwise, only minimal modification are allowed to the existing text.
-    Description of this field: ${targetDescription}
-    
-    Respond with ONLY the resulted text. Do not include labels, quotes, or explanations.`;
+    const systemPrompt = getFieldExpansionPrompt(structuredData, field);
 
     const payload = {
         contents: [{ parts: [{ text: "Expand this field." }] }],
@@ -808,27 +640,7 @@ const regenerateVoice = async (structuredData) => {
 
     const currentVoice = structuredData.voiceId?.split(' ')[0] || '';
 
-    const systemPrompt = `You are a professional voice casting director for RPG characters. Your task is to select a NEW voice for this character that matches their profile.
-
-Character Information:
-- Name: ${structuredData.name}
-- Race/Class: ${structuredData.raceClass}
-- Gender: ${structuredData.gender}
-- Age Range: ${structuredData.ageRange}
-- Personality: ${structuredData.personality}
-
-Available Voices:
-${AVAILABLE_VOICES.join("\n")}
-
-${VOICE_SELECTION_GUIDELINES}
-
-Voice Selection Process:
-1. Analyze the character's gender, age, and personality traits
-2. Identify the TOP 3 voices that best match this character
-
-CRITICAL: 
-- Return your TOP 3 choices as a list of strings.
-- Just provide the best matches.`;
+    const systemPrompt = getVoiceRegenerationPrompt(structuredData, AVAILABLE_VOICES);
 
     const payload = {
         contents: [{ parts: [{ text: "Select new voice candidates for this character." }] }],
@@ -1093,11 +905,11 @@ const getUserIdByEmail = async (db, email) => {
         const usersRef = collection(db, 'all_users');
         const q = query(usersRef, where('email', '==', email));
         const snapshot = await getDocs(q);
-        
+
         if (snapshot.empty) {
             return null;
         }
-        
+
         return snapshot.docs[0].id;
     } catch (error) {
         console.error("Error getting user by email:", error);
@@ -1110,21 +922,21 @@ const shareNPC = async (db, npc, senderUserId, senderEmail, recipientEmail, incl
     try {
         // Get recipient's userId
         const recipientUserId = await getUserIdByEmail(db, recipientEmail);
-        
+
         if (!recipientUserId) {
             throw new Error(`No user found with email: ${recipientEmail}`);
         }
-        
+
         if (recipientUserId === senderUserId) {
             throw new Error("You cannot share an NPC with yourself");
         }
-        
+
         // Check if NPC has a first scene
         let firstScene = null;
         if (includeFirstScene && npc.chats && npc.chats.length > 0 && npc.chats[0].role === 'scene') {
             firstScene = npc.chats[0];
         }
-        
+
         // Create the shared NPC data
         const sharedNpcData = {
             // Copy all NPC fields
@@ -1133,7 +945,7 @@ const shareNPC = async (db, npc, senderUserId, senderEmail, recipientEmail, incl
             structuredData: npc.structuredData,
             imageUrl: npc.imageUrl,
             cloudinaryImageId: npc.cloudinaryImageId,
-            
+
             // Add sharing metadata
             isSharedNPC: true,
             sharedFrom: {
@@ -1143,19 +955,19 @@ const shareNPC = async (db, npc, senderUserId, senderEmail, recipientEmail, incl
             },
             sharedWithScene: includeFirstScene && firstScene !== null,
             protectedFirstScene: includeFirstScene && firstScene !== null,
-            
+
             // Initialize chats with first scene if included
             chats: firstScene ? [firstScene] : [],
-            
+
             // Set timestamps
             createdAt: new Date().toISOString(),
             ownerId: recipientUserId,
         };
-        
+
         // Add to recipient's shared_npcs collection
         const sharedNpcRef = doc(collection(db, sharedNpcCollectionPath(appId, recipientUserId)));
         await setDoc(sharedNpcRef, { ...sharedNpcData, id: sharedNpcRef.id });
-        
+
         return { success: true, recipientUserId };
     } catch (error) {
         console.error("Error sharing NPC:", error);
@@ -1163,12 +975,7 @@ const shareNPC = async (db, npc, senderUserId, senderEmail, recipientEmail, incl
     }
 };
 
-// Tips to show in rotation
-const TIPS = [
-    { text: 'Type', code: '/scene', suffix: 'to set a scene at any time' },
-    { text: 'Describe your character\'s actions using square brackets', code: '[like this]', suffix: '' },
-    { text: 'Try typing', code: '[Describe the NPC\'s internal monologue]', suffix: '— you might be surprised!' },
-];
+
 
 
 
@@ -1433,7 +1240,7 @@ const EditableField = ({ label, value, displayValue, onSave, onRegenerate, onExp
                             onChange={(e) => setTempValue(e.target.value)}
                             onKeyDown={handleKeyDown}
                             className="flex-1 p-2 border border-gray-300 rounded focus:ring-indigo-500 focus:border-indigo-500 resize-none"
-                            style={{fontSize: '16px'}}
+                            style={{ fontSize: '16px' }}
                             rows={rows}
                             autoFocus
                         />
@@ -1887,16 +1694,16 @@ const ConfirmationModal = ({ isOpen, onClose, onConfirm, title, message }) => {
     );
 };
 
-const SceneModal = ({ 
-    isOpen, 
-    onClose, 
-    sceneText, 
-    isGenerating, 
+const SceneModal = ({
+    isOpen,
+    onClose,
+    sceneText,
+    isGenerating,
     isEditing,
     onEdit,
-    onSave, 
-    onRegenerate, 
-    onStartWithScene 
+    onSave,
+    onRegenerate,
+    onStartWithScene
 }) => {
     useEffect(() => {
         const handleEscape = (e) => {
@@ -1913,9 +1720,9 @@ const SceneModal = ({
 
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 px-4" onClick={onClose}>
-            <div 
+            <div
                 className="w-full bg-white rounded-xl shadow-2xl border-2 border-indigo-100 overflow-hidden animate-in fade-in zoom-in-95 duration-200"
-                style={{maxWidth: 'min(672px, 85vw)'}}
+                style={{ maxWidth: 'min(672px, 85vw)' }}
                 onClick={e => e.stopPropagation()}
             >
                 {isGenerating ? (
@@ -2028,7 +1835,7 @@ const ShareNPCModal = ({ isOpen, onClose, npc, db, userId, userEmail }) => {
 
     const handleShare = async () => {
         const email = recipientEmail.trim().toLowerCase();
-        
+
         if (!email) {
             setStatus('Please enter an email address');
             setStatusType('error');
@@ -2051,7 +1858,7 @@ const ShareNPCModal = ({ isOpen, onClose, npc, db, userId, userEmail }) => {
             await shareNPC(db, npc, userId, userEmail, email, includeFirstScene);
             setStatus(`Successfully shared "${npc.name}" with ${email}!`);
             setStatusType('success');
-            
+
             // Log usage
             await logUsage(userId, userEmail, 'npc_shared', {
                 npcId: npc.id,
@@ -2077,7 +1884,7 @@ const ShareNPCModal = ({ isOpen, onClose, npc, db, userId, userEmail }) => {
 
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 px-4" onClick={onClose}>
-            <div 
+            <div
                 className="w-full max-w-md bg-white rounded-xl shadow-2xl border-2 border-indigo-100 overflow-hidden animate-in fade-in zoom-in-95 duration-200"
                 onClick={e => e.stopPropagation()}
             >
@@ -2131,13 +1938,12 @@ const ShareNPCModal = ({ isOpen, onClose, npc, db, userId, userEmail }) => {
                     )}
 
                     {status && (
-                        <div className={`p-3 rounded-lg text-sm ${
-                            statusType === 'success' 
-                                ? 'bg-green-50 text-green-800 border border-green-200' 
-                                : statusType === 'error'
+                        <div className={`p-3 rounded-lg text-sm ${statusType === 'success'
+                            ? 'bg-green-50 text-green-800 border border-green-200'
+                            : statusType === 'error'
                                 ? 'bg-red-50 text-red-800 border border-red-200'
                                 : 'bg-blue-50 text-blue-800 border border-blue-200'
-                        }`}>
+                            }`}>
                             {status}
                         </div>
                     )}
@@ -2215,7 +2021,7 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
 
         const chats = npc.chats || [];
         setChatHistory(chats);
-        
+
         // Parse and restore current goal from chat history
         if (chats.length > 0) {
             // Find the most recent scene
@@ -2228,7 +2034,7 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
                     break;
                 }
             }
-            
+
             if (mostRecentSceneText) {
                 // Check if goal was already achieved (look for goal_achieved message after this scene)
                 let goalAlreadyAchieved = false;
@@ -2239,7 +2045,7 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
                         break;
                     }
                 }
-                
+
                 // If goal not achieved yet, parse and set current goal
                 if (!goalAlreadyAchieved) {
                     const goal = parseGoalFromScene(mostRecentSceneText);
@@ -2250,7 +2056,7 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
                 }
             }
         }
-        
+
         // Load the saved Cloudinary image URL if it exists
         setCurrentImageUrl(npc.imageUrl || null);
 
@@ -2310,7 +2116,7 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
         try {
             // Create a simple "pa-pam!" sound using Web Audio API
             const audioContext = new (window.AudioContext || window.webkitAudioContext)();
-            
+
             // First note "pa" (higher pitch)
             const oscillator1 = audioContext.createOscillator();
             const gainNode1 = audioContext.createGain();
@@ -2321,7 +2127,7 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
             gainNode1.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.2);
             oscillator1.start(audioContext.currentTime);
             oscillator1.stop(audioContext.currentTime + 0.2);
-            
+
             // Second note "pam" (lower pitch, slightly delayed)
             const oscillator2 = audioContext.createOscillator();
             const gainNode2 = audioContext.createGain();
@@ -2432,37 +2238,37 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
             checkGoal = false,
             playAudioOnResponse = false
         } = options;
-        
+
         // Get NPC response (and check goal if needed)
         const npcResponse = await getNPCResponse(
             npc.structuredData,
             historyBeforeResponse,
             checkGoal ? currentSceneGoal : null
         );
-        
+
         // Handle response format (string or object with goalAchieved)
         let npcResponseText;
         let isGoalAchieved = false;
-        
+
         if (typeof npcResponse === 'string') {
             npcResponseText = npcResponse;
         } else {
             npcResponseText = npcResponse.response;
             isGoalAchieved = npcResponse.goalAchieved;
         }
-        
+
         // Create NPC message
         const npcMsg = {
             role: 'npc',
             text: npcResponseText,
             timestamp: new Date().toISOString()
         };
-        
+
         let finalHistory = [...historyBeforeResponse, npcMsg];
-        
+
         // Update state
         setChatHistory(finalHistory);
-        
+
         // Update Firestore
         const collectionPath = npc.isSharedNPC ? sharedNpcCollectionPath(appId, userId) : npcCollectionPath(appId, userId);
         const npcRef = doc(db, collectionPath, npc.id);
@@ -2470,14 +2276,14 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
             chats: finalHistory,
             updatedAt: new Date().toISOString()
         });
-        
+
         // Auto-play audio if requested and enabled
         if (playAudioOnResponse && isAutoPlayEnabled && npc.structuredData.voiceId) {
             const voiceId = npc.structuredData.voiceId.split(' ')[0];
             const npcMessageIndex = historyBeforeResponse.length;
             await playAudio(npcResponseText, voiceId, npcMessageIndex);
         }
-        
+
         return { npcResponseText, isGoalAchieved, finalHistory };
     };
 
@@ -2488,7 +2294,7 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
         // Check for slash command /scene
         if (text.toLowerCase().startsWith('/scene')) {
             const sceneText = text.substring(6).trim();
-            
+
             // If no text after /scene, open the scene modal
             if (!sceneText) {
                 setMessage('');
@@ -2536,7 +2342,7 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
             } finally {
                 setIsThinking(false);
             }
-            
+
             scrollToBottom('chat-container');
             return;
         }
@@ -2559,7 +2365,7 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
                 newHistory,
                 { checkGoal: shouldCheckGoal, playAudioOnResponse: false }
             );
-            
+
             let finalHistory = historyWithNPC;
 
             // 3. If goal was achieved, add achievement message
@@ -2572,7 +2378,7 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
                         break;
                     }
                 }
-                
+
                 // Add goal achievement message
                 const goalAchievedMsg = {
                     role: 'goal_achieved',
@@ -2581,14 +2387,14 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
                 };
                 finalHistory = [...finalHistory, goalAchievedMsg];
                 setGoalAchievedForScene(mostRecentSceneIndex);
-                
+
                 // Clear scene cache so next scene will be freshly generated
                 delete sceneCache.current[npc.id];
                 setStartingSceneText('');
-                
+
                 // Play success sound
                 playSuccessSound();
-                
+
                 // Update Firestore with goal achieved message
                 const collectionPath = npc.isSharedNPC ? sharedNpcCollectionPath(appId, userId) : npcCollectionPath(appId, userId);
                 const npcRef = doc(db, collectionPath, npc.id);
@@ -2596,7 +2402,7 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
                     chats: finalHistory,
                     updatedAt: new Date().toISOString()
                 });
-                
+
                 setChatHistory(finalHistory);
             }
 
@@ -2610,8 +2416,8 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
             // 5. Auto-play if enabled
             if (isAutoPlayEnabled) {
                 // The new message is at the end of finalHistory (or second to last if goal achieved)
-                const npcMessageIndex = finalHistory[finalHistory.length - 1].role === 'goal_achieved' 
-                    ? finalHistory.length - 2 
+                const npcMessageIndex = finalHistory[finalHistory.length - 1].role === 'goal_achieved'
+                    ? finalHistory.length - 2
                     : finalHistory.length - 1;
                 handleSpeakClick(npcResponseText, npcMessageIndex);
             }
@@ -2622,7 +2428,7 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
             setChatHistory(prev => prev.slice(0, prev.length - 1));
             // Restore the message so the user doesn't have to retype it
             setMessage(text);
-            
+
             // Show user-friendly error message
             let errorMessage = `${npc.name} couldn't respond right now.\n\n`;
             if (e.message && e.message.includes("overloaded")) {
@@ -2656,7 +2462,7 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
             if (message.role === 'scene') {
                 // For scenes: remove the scene and everything after it
                 const newHistory = chatHistory.slice(0, sceneIndex);
-                
+
                 // Put the scene text in cache and state
                 sceneCache.current[npc.id] = message.text;
                 setStartingSceneText(message.text);
@@ -2667,7 +2473,7 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
 
                 // Update chat history in state and Firestore
                 setChatHistory(newHistory);
-                
+
                 if (db) {
                     const collectionPath = npc.isSharedNPC ? sharedNpcCollectionPath(appId, userId) : npcCollectionPath(appId, userId);
                     const npcRef = doc(db, collectionPath, npc.id);
@@ -2692,7 +2498,7 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
 
                 // Update chat history in state and Firestore
                 setChatHistory(newHistory);
-                
+
                 if (db) {
                     const collectionPath = npc.isSharedNPC ? sharedNpcCollectionPath(appId, userId) : npcCollectionPath(appId, userId);
                     const npcRef = doc(db, collectionPath, npc.id);
@@ -2707,7 +2513,7 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
                     npcId: npc.id,
                     messageIndex: sceneIndex
                 });
-                
+
                 scrollToBottom('chat-container');
             }
 
@@ -2722,7 +2528,7 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
         const confirmMessage = hasProtectedScene
             ? "This will clear the conversation but keep the protected starting scene. Continue?"
             : "Are you sure you want to clear the conversation history? This cannot be undone.";
-            
+
         if (!confirm(confirmMessage)) return;
 
         try {
@@ -2734,7 +2540,7 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
 
             // Determine what to reset to
             const newChats = hasProtectedScene ? [chatHistory[0]] : [];
-            
+
             const collectionPath = npc.isSharedNPC ? sharedNpcCollectionPath(appId, userId) : npcCollectionPath(appId, userId);
             const npcRef = doc(db, collectionPath, npc.id);
             await updateDoc(npcRef, {
@@ -2742,7 +2548,7 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
                 updatedAt: new Date().toISOString()
             });
             setChatHistory(newChats);
-            
+
             // Reset goal tracking state
             setCurrentSceneGoal(null);
             setGoalAchievedForScene(null);
@@ -3256,12 +3062,12 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
                     chatHistory
                         .map((msg, index) => {
                             // Check if this is a goal_achieved message and if there's a scene after it
-                            const showGoalButtons = msg.role === 'goal_achieved' && 
+                            const showGoalButtons = msg.role === 'goal_achieved' &&
                                 !chatHistory.slice(index + 1).some(m => m.role === 'scene');
-                            
+
                             // Check if this is a protected first scene
                             const isProtected = npc.protectedFirstScene && index === 0 && msg.role === 'scene';
-                            
+
                             return (
                                 <ChatBubble
                                     key={index}
@@ -3409,7 +3215,7 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
                         {/* Chat History Container - Scrollable */}
                         <div id="chat-container" className="h-full px-2 sm:px-6 py-6 space-y-4 overflow-y-auto bg-gray-50">
                             {chatHistory.length === 0 ? (
-                                <div 
+                                <div
                                     className="flex flex-col items-center justify-center h-full p-8 text-center space-y-6 animate-fade-in"
                                 >
                                     <MessageSquare className="w-16 h-16 mx-auto mb-4 text-gray-200" />
@@ -3434,12 +3240,12 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
                                 chatHistory
                                     .map((msg, index) => {
                                         // Check if this is a goal_achieved message and if there's a scene after it
-                                        const showGoalButtons = msg.role === 'goal_achieved' && 
+                                        const showGoalButtons = msg.role === 'goal_achieved' &&
                                             !chatHistory.slice(index + 1).some(m => m.role === 'scene');
-                                        
+
                                         // Check if this is a protected first scene
                                         const isProtected = npc.protectedFirstScene && index === 0 && msg.role === 'scene';
-                                        
+
                                         return (
                                             <ChatBubble
                                                 key={index}
@@ -3831,7 +3637,7 @@ const CompactNpcList = ({ npcs, sharedNpcs = [], selectedNpcId, onNpcSelected, o
                                 ))}
                             </div>
                         )}
-                        
+
                         {/* Shared with Me Section */}
                         {sharedNpcs.length > 0 && (
                             <div>
@@ -4083,13 +3889,13 @@ const NPCGeneratorChatbot = ({ user, impersonatedUserId, onShowAdmin }) => {
 
     const handleNpcDelete = async (npc) => {
         if (!db) return;
-        
+
         try {
             // Use the correct collection path based on NPC type
             const collectionPath = npc.isSharedNPC ? sharedNpcCollectionPath(appId, userId) : npcCollectionPath(appId, userId);
             const npcRef = doc(db, collectionPath, npc.id);
             await deleteDoc(npcRef);
-            
+
             // If the deleted NPC was selected, clear selection
             if (selectedNpcId === npc.id) {
                 setSelectedNpcId(null);
