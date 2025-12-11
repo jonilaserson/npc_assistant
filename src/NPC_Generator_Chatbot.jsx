@@ -15,10 +15,12 @@ import {
 import { collection, deleteDoc, doc, getDocs, onSnapshot, orderBy, query, setDoc, updateDoc, where } from 'firebase/firestore';
 import { getDownloadURL, ref, uploadString } from 'firebase/storage';
 import { auth, db, storage } from './firebaseConfig';
-import { Loader2, Zap, Brain, Wand2, MessageSquare, List, Send, Volume2, VolumeX, User, ChevronsDown, ChevronsUp, RefreshCw, Trash2, X, ChevronLeft, ChevronRight, Plus, GripVertical, Check, RotateCcw, Edit2, Eye, EyeOff, Sparkles, Maximize2, Play, Share2, AlertTriangle } from 'lucide-react';
+import { Loader2, Zap, Brain, Wand2, MessageSquare, List, Send, Volume2, VolumeX, User, ChevronsDown, ChevronsUp, RefreshCw, Trash2, X, ChevronLeft, ChevronRight, Plus, GripVertical, Check, RotateCcw, Edit2, Eye, EyeOff, Sparkles, Maximize2, Play, Share2, AlertTriangle, Coins } from 'lucide-react';
 import { FeedbackButton } from './components/FeedbackButton';
 import { logUsage } from './analytics';
 import * as Sentry from "@sentry/react";
+import { getCredits, deductCredits } from './services/creditService';
+import GoldStoreModal from './components/GoldStoreModal';
 
 const magicalStyles = `
 @keyframes magic-wiggle {
@@ -41,6 +43,14 @@ const magicalStyles = `
 }
 .animate-sparkle-2 {
     animation: sparkle-fade 1s ease-in-out infinite 0.5s;
+}
+@keyframes gold-pulse {
+    0% { transform: scale(1); filter: brightness(1); }
+    50% { transform: scale(1.1); filter: brightness(1.3) drop-shadow(0 0 5px gold); }
+    100% { transform: scale(1); filter: brightness(1); }
+}
+.animate-gold-pulse {
+    animation: gold-pulse 0.5s ease-in-out;
 }
 `;
 
@@ -596,7 +606,7 @@ const LoadingIndicator = () => (
     </div>
 );
 
-const NpcCreation = ({ db, userId, onNpcCreated }) => {
+const NpcCreation = ({ db, userId, onNpcCreated, handleDeductCredits }) => {
     const [rawDescription, setRawDescription] = useState('');
     const [isGenerating, setIsGenerating] = useState(false);
     const [status, setStatus] = useState('');
@@ -607,9 +617,13 @@ const NpcCreation = ({ db, userId, onNpcCreated }) => {
             return;
         }
         setIsGenerating(true);
+
         setStatus('Generating NPC profile...');
 
         try {
+            // Check and deduct credits (1 Gold)
+            await handleDeductCredits(1);
+
             // Step 1: Generate structured data
             const structuredData = await generateStructuredNPC(rawDescription);
             const npcName = structuredData.name || 'Unnamed NPC';
@@ -648,6 +662,9 @@ const NpcCreation = ({ db, userId, onNpcCreated }) => {
             onNpcCreated(newNpcRef.id);
         } catch (e) {
             setStatus(`Error: ${e.message}`);
+            if (e.message === "Insufficient funds") {
+                alert("Insufficient Gold! Please visit the Gold Store to get more.");
+            }
             console.error('Error creating NPC:', e);
         } finally {
             setIsGenerating(false);
@@ -1159,7 +1176,7 @@ const ShareNPCModal = ({ isOpen, onClose, npc, db, userId, userEmail }) => {
     );
 };
 
-const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileView = 'details', onShowConversation, onShowDetails, currentTip }) => {
+const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileView = 'details', onShowConversation, onShowDetails, currentTip, handleDeductCredits }) => {
 
 
     const [message, setMessage] = useState('');
@@ -1346,6 +1363,9 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
                 audioUrl = audioCache[text];
             } else {
                 // Generate TTS using the NPC's structured data for voice selection
+                // Deduct credits (2 Gold) for NEW generation
+                await handleDeductCredits(2);
+
                 audioUrl = await textToSpeech(text, npc.structuredData);
 
                 if (!audioUrl) {
@@ -1391,6 +1411,10 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
         } catch (e) {
             console.error("TTS Error:", e.message);
 
+            if (e.message === "Insufficient funds") {
+                alert("Insufficient Gold! Please visit the Gold Store to get more.");
+            }
+
             // Only log critical TTS errors to Sentry (quota, API failures)
             if (e.message.includes('quota') || e.message.includes('API') || e.message.includes('service')) {
                 Sentry.captureException(e, {
@@ -1411,6 +1435,7 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
             setPlayingMessageIndex(null);
         }
     };
+
 
     // Helper function to get NPC response, update state and Firestore
     // Returns: { npcResponseText, isGoalAchieved, finalHistory }
@@ -1766,6 +1791,9 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
     const handleRegenerateImage = async () => {
         setIsImageGenerating(true);
         try {
+            // Deduct credits (5 Gold)
+            await handleDeductCredits(5);
+
             const data = npc.structuredData;
 
             // Step 1: Generate image with DALL-E 3 and upload to Cloudinary (via backend)
@@ -1798,6 +1826,11 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
             }
         } catch (error) {
             console.error(`Error regenerating image: ${error.message}`);
+            if (error.message === "Insufficient funds") {
+                alert("Insufficient Gold! Please visit the Gold Store to get more.");
+            } else {
+                alert("Failed to generate image. Please try again.");
+            }
         } finally {
             setIsImageGenerating(false);
         }
@@ -3013,7 +3046,34 @@ const NPCGeneratorChatbot = ({ user, impersonatedUserId, onShowAdmin }) => {
 
     const [selectedNpcId, setSelectedNpcId] = useState(null);
     const [showCreateForm, setShowCreateForm] = useState(false);
+
     const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+    const [showGoldStore, setShowGoldStore] = useState(false);
+    const [isGoldGlittering, setIsGoldGlittering] = useState(false);
+    const [credits, setCredits] = useState(0); // State to store displayed credits
+
+    // Fetch credits on load
+    useEffect(() => {
+        if (userId) {
+            getCredits(userId).then(setCredits);
+        }
+    }, [userId]);
+
+    // Wrapper for deducting credits with animation and state update
+    const handleDeductCredits = async (amount) => {
+        const newBalance = await deductCredits(userId, amount);
+        setCredits(newBalance); // Update displayed balance
+        setIsGoldGlittering(true);
+        setTimeout(() => setIsGoldGlittering(false), 500);
+    };
+
+    const handleCloseGoldStore = () => {
+        setShowGoldStore(false);
+        // Refetch credits in case user bought more
+        if (userId) {
+            getCredits(userId).then(setCredits);
+        }
+    };
 
     // Mobile state management
     const [isMobile, setIsMobile] = useState(false);
@@ -3143,6 +3203,7 @@ const NPCGeneratorChatbot = ({ user, impersonatedUserId, onShowAdmin }) => {
                 onShowConversation={handleShowConversation}
                 onShowDetails={handleShowDetails}
                 currentTip={TIPS[currentTipIndex]}
+                handleDeductCredits={handleDeductCredits}
             />
         );
     } else if (showCreateForm) {
@@ -3151,7 +3212,7 @@ const NPCGeneratorChatbot = ({ user, impersonatedUserId, onShowAdmin }) => {
                 <NpcCreation
                     db={db}
                     userId={userId}
-
+                    handleDeductCredits={handleDeductCredits}
                     onNpcCreated={handleNpcCreated}
                 />
             </div>
@@ -3167,7 +3228,7 @@ const NPCGeneratorChatbot = ({ user, impersonatedUserId, onShowAdmin }) => {
                     <Button
                         onClick={handleCreateNew}
                         icon={Plus}
-                        className="px-6 py-3 text-lg"
+                        className="px-6 py-3 text-lg mx-auto"
                     >
                         Create New NPC
                     </Button>
@@ -3200,16 +3261,23 @@ const NPCGeneratorChatbot = ({ user, impersonatedUserId, onShowAdmin }) => {
                 {/* Only show header on list view */}
                 {(mobileView === 'list' || (!selectedNpc && !showCreateForm)) && (
                     <header className="flex-shrink-0 p-4 bg-white border-b border-gray-200 shadow-sm">
-                        <div className="flex flex-col justify-between md:flex-row md:items-center">
+                        <div className="flex items-start justify-between">
                             <div>
-                                <h1 className="flex items-center text-2xl font-extrabold text-indigo-800">
-                                    <User className="w-7 h-7 mr-2 text-indigo-500" />
-                                    GM NPC Assistant
+                                <h1 className="flex items-center text-xl font-extrabold text-indigo-800">
+                                    <User className="w-6 h-6 mr-2 text-indigo-500" />
+                                    Drive My Character
                                 </h1>
                                 <p className="mt-1 text-xs text-gray-600">
-                                    Generate, store, and roleplay your campaign's characters.
+                                    Roleplay with your NPCs.
                                 </p>
                             </div>
+                            <button
+                                onClick={() => setShowGoldStore(true)}
+                                className={`group flex-shrink-0 ml-2 px-3 py-1.5 text-gray-700 hover:text-yellow-300 font-bold text-sm rounded-full transition-all duration-300 flex items-center bg-gray-50 hover:bg-gray-600 border border-gray-200 hover:border-gray-500 ${isGoldGlittering ? 'animate-gold-pulse text-yellow-600' : ''}`}
+                            >
+                                <Coins className={`w-4 h-4 mr-1.5 text-yellow-500 group-hover:text-yellow-300 ${isGoldGlittering ? 'text-yellow-500' : ''}`} />
+                                {credits}
+                            </button>
                         </div>
                     </header>
                 )}
@@ -3238,24 +3306,42 @@ const NPCGeneratorChatbot = ({ user, impersonatedUserId, onShowAdmin }) => {
                     <div>
                         <h1 className="flex items-center text-2xl font-extrabold text-indigo-800">
                             <User className="w-7 h-7 mr-2 text-indigo-500" />
-                            GM NPC Assistant
+                            Drive My Character
                         </h1>
                         <p className="mt-1 text-xs text-gray-600">
-                            Generate, store, and roleplay your campaign's characters.
+                            Roleplay with your NPCs.
                         </p>
                     </div>
 
                     {/* Admin Button - only show if user is admin and not impersonating */}
-                    {user?.email === import.meta.env.VITE_ADMIN_EMAIL && !impersonatedUserId && onShowAdmin && (
+                    <div className="flex items-center">
                         <button
-                            onClick={onShowAdmin}
-                            className="mt-2 md:mt-0 px-4 py-2 bg-indigo-600 text-white text-sm rounded-lg hover:bg-indigo-700 transition-colors"
+                            onClick={() => setShowGoldStore(true)}
+                            className={`group mt-2 md:mt-0 mr-4 px-3 py-1.5 text-gray-700 hover:text-yellow-300 font-bold text-sm rounded-full transition-all duration-300 flex items-center hover:bg-gray-600 border border-transparent hover:border-gray-500 ${isGoldGlittering ? 'animate-gold-pulse text-yellow-600' : ''}`}
+                            title="My Gold"
                         >
-                            Admin Dashboard
+                            <Coins className={`w-4 h-4 mr-1.5 text-yellow-500 group-hover:text-yellow-300 ${isGoldGlittering ? 'text-yellow-500' : ''}`} />
+                            {credits}
                         </button>
-                    )}
+
+                        {user?.email === import.meta.env.VITE_ADMIN_EMAIL && !impersonatedUserId && onShowAdmin && (
+                            <button
+                                onClick={onShowAdmin}
+                                className="mt-2 md:mt-0 px-4 py-2 bg-indigo-600 text-white text-sm rounded-lg hover:bg-indigo-700 transition-colors"
+                            >
+                                Admin Dashboard
+                            </button>
+                        )}
+                    </div>
                 </div>
             </header>
+
+            {showGoldStore && (
+                <GoldStoreModal
+                    userId={userId}
+                    onClose={handleCloseGoldStore}
+                />
+            )}
 
             <div className="flex-1 overflow-hidden">
                 <ResizablePanels
@@ -3264,7 +3350,7 @@ const NPCGeneratorChatbot = ({ user, impersonatedUserId, onShowAdmin }) => {
                     isLeftCollapsed={isSidebarCollapsed}
                 />
             </div>
-        </div>
+        </div >
     );
 };
 

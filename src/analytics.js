@@ -58,13 +58,45 @@ export const trackUser = async (userId, email, displayName = null) => {
     }
 
     try {
-        // Add/update user in all_users collection
-        await setDoc(doc(db, 'all_users', userId), {
+        const userRef = doc(db, 'all_users', userId);
+        const userSnap = await import('firebase/firestore').then(m => m.getDoc(userRef));
+
+        const userData = {
             email,
             displayName,
             lastSeen: serverTimestamp(),
-            createdAt: serverTimestamp()
-        }, { merge: true });
+            createdAt: userSnap.exists() ? undefined : serverTimestamp()
+        };
+
+        // Initialize credits if user is new or doesn't have credits
+        if (!userSnap.exists() || userSnap.data().credits === undefined) {
+            userData.credits = 100;
+        }
+
+        // We use setDoc with merge: true to safe update
+        // Note: undefined fields in userData (like createdAt if exists) won't overwrite due to how JS objects work 
+        // IF we clean them, but Firestore setDoc might treat undefined as "delete" or "ignore" depending on settings?
+        // Actually, with merge:true, it's safer to just build the object conditionally.
+
+        const stringifiedData = JSON.parse(JSON.stringify(userData)); // quick clean of undefineds if any remain
+        // actually better to just not add them.
+
+        const finalData = {
+            email,
+            displayName,
+            lastSeen: serverTimestamp()
+        };
+
+        if (!userSnap.exists()) {
+            finalData.createdAt = serverTimestamp();
+            finalData.credits = 100;
+        } else if (userSnap.data().credits === undefined) {
+            // Existing user but no credits? Give them the starter pack.
+            finalData.credits = 100;
+        }
+
+        await setDoc(userRef, finalData, { merge: true });
+
     } catch (error) {
         console.error('Error tracking user:', error);
     }
