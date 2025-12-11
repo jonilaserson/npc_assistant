@@ -5,7 +5,9 @@ import { auth } from './firebaseConfig';
 import Login from './components/Login';
 import NPC_Generator_Chatbot from './NPC_Generator_Chatbot';
 import { AdminDashboard } from './components/AdminDashboard';
+import LegalAgreementModal from './components/LegalAgreementModal';
 import { trackUser } from './analytics';
+import { checkTermsAccepted, acceptTerms } from './services/userService';
 
 const App = () => {
     const [user, setUser] = useState(null);
@@ -13,13 +15,15 @@ const App = () => {
     const [showAdmin, setShowAdmin] = useState(false);
     const [impersonatedUserId, setImpersonatedUserId] = useState(null);
     const [impersonatedEmail, setImpersonatedEmail] = useState(null);
+    const [showLegalModal, setShowLegalModal] = useState(false);
 
     useEffect(() => {
         const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
-            setUser(currentUser);
-            setLoading(false);
-
             if (currentUser) {
+                // Check if user has accepted terms BEFORE showing app
+                const accepted = await checkTermsAccepted(currentUser.uid);
+                setShowLegalModal(!accepted);
+
                 // Track user in Firestore
                 await trackUser(currentUser.uid, currentUser.email, currentUser.displayName);
 
@@ -37,6 +41,9 @@ const App = () => {
                     Sentry.setUser(null);
                 }
             }
+
+            setUser(currentUser);
+            setLoading(false);
         });
 
         return () => unsubscribe();
@@ -67,6 +74,13 @@ const App = () => {
         setImpersonatedEmail(null);
     };
 
+    const handleTermsAccepted = async () => {
+        if (user) {
+            await acceptTerms(user.uid);
+            setShowLegalModal(false);
+        }
+    };
+
     if (loading) {
         return (
             <div className="flex items-center justify-center h-screen bg-gray-900 text-white">
@@ -93,6 +107,10 @@ const App = () => {
     // Show main app (with impersonation banner if active)
     return (
         <>
+            {showLegalModal && (
+                <LegalAgreementModal onAccept={handleTermsAccepted} />
+            )}
+
             {impersonatedUserId && (
                 <div className="fixed top-0 left-0 right-0 bg-red-600 text-white p-3 text-center z-50 shadow-lg">
                     <strong>⚠️ ADMIN MODE:</strong> Viewing as {impersonatedEmail}
