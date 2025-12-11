@@ -117,8 +117,7 @@ export const getCredits = async (userId) => {
             return typeof data.credits === 'number' ? data.credits : 100;
         }
         // If user doc doesn't exist yet, they technically have 100 "potential" credits 
-        // that will be initialized on creation, but return 100 for display?
-        // Or 0? Let's return 100 so the UI looks inviting, assuming they are logged in.
+        // that will be initialized on creation, but return 100 for display.
         return 100;
     } catch (error) {
         console.error("Error getting credits:", error);
@@ -181,11 +180,14 @@ export const deductCredits = async (userId, amount) => {
             const data = userDoc.data();
             const current = typeof data.credits === 'number' ? data.credits : 100;
 
-            if (current < amount) {
-                throw new Error("Insufficient funds");
-            }
+            // CHECK DISABLED: allow proceeding even if insufficient funds
+            // if (current < amount) {
+            //     throw new Error("Insufficient funds");
+            // }
 
-            const updated = current - amount;
+            // Prevent going below 0
+            const updated = Math.max(0, current - amount);
+
             transaction.update(userRef, { credits: updated });
             return updated;
         });
