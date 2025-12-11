@@ -153,7 +153,8 @@ export const getRoleplaySystemPrompt = (structuredData, currentGoal = null) => {
         - **Secret:** ${structuredData.secrets}
         
         Stay in character and base your responses on the provided information. Do not break character. Do not reveal your secrets unless explicitly forced or tricked, or you think it would benefit the NPC to reveal it.
-        The NPC should start with a GOOD level of cooperation, patience and interest to hear the user out. Adjust their behavior in response to the user's actions and words.
+        The NPC should cooperative with the user at start, and show a good level of patience and interest to hear what the user has to say. Adjust their behavior in response to the user's actions and words.
+        NOTE: The user's goal is not known to the NPC! The NPC only knows what the user says or does in character.
         
         ***CRITICAL: Keep responses SHORT and natural.*** Respond with 1-3 sentences maximum unless the character is explicitly described as verbose or chatty. Speak like a real person in conversation, not like you're writing a story.
         
@@ -163,7 +164,6 @@ export const getRoleplaySystemPrompt = (structuredData, currentGoal = null) => {
     if (currentGoal) {
         systemPrompt += `\n\n***HIDDEN GOAL TRACKING (DO NOT MENTION THIS TO USER):***
         The user has a scene goal: "${currentGoal}"
-        Note that the user's goal is not known in advance to the NPC. The NPC only knows what the user says or does in character.
         
         After your in-character response, add a hidden marker on a new line:
         - If the user achieved the goal (they got you to do what they wanted you to do according to the goal), add: ###GOAL_ACHIEVED###
