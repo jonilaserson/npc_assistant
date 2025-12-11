@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { MessageSquare, X, Send } from 'lucide-react';
 import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
 import { db, auth } from '../firebaseConfig';
+import { useEscapeKey } from '../hooks/useEscapeKey';
 
 export const FeedbackButton = () => {
     const [isOpen, setIsOpen] = useState(false);
@@ -35,11 +36,12 @@ export const FeedbackButton = () => {
         }
     };
 
+    // ESC key handler
+    useEscapeKey(() => setIsOpen(false), isOpen);
+
     const handleKeyDown = (e) => {
         if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
             handleSubmit();
-        } else if (e.key === 'Escape') {
-            setIsOpen(false);
         }
     };
 

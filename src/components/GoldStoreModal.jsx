@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { getCredits, addCredits } from '../services/creditService';
+import { useEscapeKey } from '../hooks/useEscapeKey';
 import { Coins } from 'lucide-react';
 
 const GoldStoreModal = ({ userId, onClose }) => {
@@ -10,6 +11,9 @@ const GoldStoreModal = ({ userId, onClose }) => {
     useEffect(() => {
         loadCredits();
     }, [userId]);
+
+    // ESC key handler
+    useEscapeKey(onClose);
 
     const loadCredits = async () => {
         setLoading(true);
@@ -31,8 +35,14 @@ const GoldStoreModal = ({ userId, onClose }) => {
     };
 
     return (
-        <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50 p-4">
-            <div className="bg-gray-800 border border-yellow-600 rounded-xl shadow-2xl max-w-sm w-full p-6 relative overflow-hidden">
+        <div
+            className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50 p-4"
+            onClick={onClose}
+        >
+            <div
+                className="bg-gray-800 border border-yellow-600 rounded-xl shadow-2xl max-w-sm w-full p-6 relative overflow-hidden"
+                onClick={(e) => e.stopPropagation()}
+            >
                 {/* Decorative background glow */}
                 <div className="absolute top-0 right-0 -mt-8 -mr-8 w-32 h-32 bg-yellow-500 rounded-full mix-blend-overlay filter blur-3xl opacity-20"></div>
 

@@ -21,6 +21,7 @@ import { logUsage } from './analytics';
 import * as Sentry from "@sentry/react";
 import { getCredits, deductCredits } from './services/creditService';
 import GoldStoreModal from './components/GoldStoreModal';
+import { useEscapeKey } from './hooks/useEscapeKey';
 
 const magicalStyles = `
 @keyframes magic-wiggle {
@@ -606,10 +607,13 @@ const LoadingIndicator = () => (
     </div>
 );
 
-const NpcCreation = ({ db, userId, onNpcCreated, handleDeductCredits }) => {
+const NpcCreation = ({ db, userId, onNpcCreated, handleDeductCredits, onCancel }) => {
     const [rawDescription, setRawDescription] = useState('');
     const [isGenerating, setIsGenerating] = useState(false);
     const [status, setStatus] = useState('');
+
+    // ESC key handler
+    useEscapeKey(onCancel);
 
     const handleGenerateNPC = async () => {
         if (!rawDescription.trim()) {
@@ -672,46 +676,65 @@ const NpcCreation = ({ db, userId, onNpcCreated, handleDeductCredits }) => {
     };
 
     return (
-        <div className="p-4 space-y-6 bg-white rounded-lg shadow-xl md:p-8">
-            <h2 className="flex items-center text-2xl font-bold text-indigo-700">
-                <Brain className="w-6 h-6 mr-2" />
-                Create New NPC Profile
-            </h2>
-            <div className="p-4 space-y-4 rounded-lg bg-gray-50">
-                <label className="block text-sm font-medium text-gray-700">
-                    Raw NPC Description (Copy-Paste your notes here):
-                </label>
-                <textarea
-                    value={rawDescription}
-                    onChange={(e) => setRawDescription(e.target.value)}
-                    onKeyDown={(e) => {
-                        if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
-                            e.preventDefault();
-                            handleGenerateNPC();
-                        }
-                    }}
-                    rows="6"
-                    placeholder="E.g., An elven librarian named Elara. She is frail, old and wears thick glasses. Constantly dusts her shelves. Secretly a member of the resistance."
-                    className="w-full p-3 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500"
-                />
-                <Button
-                    onClick={handleGenerateNPC}
-                    loading={isGenerating}
-                    icon={Zap}
-                    disabled={!rawDescription.trim()}
-                    className="w-full"
-                >
-                    Generate NPC
-                </Button>
-            </div>
-
-
-
-            {status && (
-                <div className={`p-3 text-sm rounded-lg ${status.startsWith('Error') ? 'bg-red-100 text-red-700' : 'bg-yellow-100 text-yellow-700'}`}>
-                    Status: {status}
+        <div
+            className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-[9999] p-4"
+            onClick={onCancel}
+        >
+            <div
+                className="bg-white rounded-lg shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto"
+                onClick={(e) => e.stopPropagation()}
+            >
+                <div className="sticky top-0 bg-white border-b border-gray-200 p-4 md:p-6 flex items-center justify-between">
+                    <h2 className="flex items-center text-2xl font-bold text-indigo-700">
+                        <Brain className="w-6 h-6 mr-2" />
+                        Create New NPC Profile
+                    </h2>
+                    <button
+                        onClick={onCancel}
+                        className="text-gray-500 hover:text-gray-700 p-2"
+                        aria-label="Close"
+                    >
+                        <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                    </button>
                 </div>
-            )}
+                <div className="p-4 md:p-6 space-y-6">
+                    <div className="p-4 space-y-4 rounded-lg bg-gray-50">
+                        <label className="block text-sm font-medium text-gray-700">
+                            Raw NPC Description (Copy-Paste your notes here):
+                        </label>
+                        <textarea
+                            value={rawDescription}
+                            onChange={(e) => setRawDescription(e.target.value)}
+                            onKeyDown={(e) => {
+                                if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+                                    e.preventDefault();
+                                    handleGenerateNPC();
+                                }
+                            }}
+                            rows="6"
+                            placeholder="E.g., An elven librarian named Elara. She is frail, old and wears thick glasses. Constantly dusts her shelves. Secretly a member of the resistance."
+                            className="w-full p-3 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500"
+                        />
+                        <Button
+                            onClick={handleGenerateNPC}
+                            loading={isGenerating}
+                            icon={Zap}
+                            disabled={!rawDescription.trim()}
+                            className="w-full"
+                        >
+                            Generate NPC
+                        </Button>
+                    </div>
+
+                    {status && (
+                        <div className={`p-3 text-sm rounded-lg ${status.startsWith('Error') ? 'bg-red-100 text-red-700' : 'bg-yellow-100 text-yellow-700'}`}>
+                            Status: {status}
+                        </div>
+                    )}
+                </div>
+            </div>
         </div>
     );
 };
@@ -856,16 +879,7 @@ const ChatBubble = ({ message, npcName, isSpeaking, onSpeakClick, onSetNextScene
 };
 
 const ImageModal = ({ isOpen, onClose, imageUrl, altText }) => {
-    useEffect(() => {
-        const handleEscape = (e) => {
-            if (e.key === 'Escape' && isOpen) {
-                onClose();
-            }
-        };
-
-        window.addEventListener('keydown', handleEscape);
-        return () => window.removeEventListener('keydown', handleEscape);
-    }, [isOpen, onClose]);
+    useEscapeKey(onClose, isOpen);
 
     if (!isOpen) return null;
 
@@ -901,16 +915,7 @@ const SceneModal = ({
     onRegenerate,
     onStartWithScene
 }) => {
-    useEffect(() => {
-        const handleEscape = (e) => {
-            if (e.key === 'Escape' && isOpen) {
-                onClose();
-            }
-        };
-
-        window.addEventListener('keydown', handleEscape);
-        return () => window.removeEventListener('keydown', handleEscape);
-    }, [isOpen, onClose]);
+    useEscapeKey(onClose, isOpen);
 
     if (!isOpen) return null;
 
@@ -1018,16 +1023,7 @@ const ShareNPCModal = ({ isOpen, onClose, npc, db, userId, userEmail }) => {
         }
     }, [isOpen]);
 
-    useEffect(() => {
-        const handleEscape = (e) => {
-            if (e.key === 'Escape' && isOpen && !isSharing) {
-                onClose();
-            }
-        };
-
-        window.addEventListener('keydown', handleEscape);
-        return () => window.removeEventListener('keydown', handleEscape);
-    }, [isOpen, isSharing, onClose]);
+    useEscapeKey(onClose, isOpen && !isSharing);
 
     const handleShare = async () => {
         const email = recipientEmail.trim().toLowerCase();
@@ -3206,17 +3202,6 @@ const NPCGeneratorChatbot = ({ user, impersonatedUserId, onShowAdmin }) => {
                 handleDeductCredits={handleDeductCredits}
             />
         );
-    } else if (showCreateForm) {
-        rightPanelContent = (
-            <div className="h-full overflow-y-auto bg-gray-50 p-4">
-                <NpcCreation
-                    db={db}
-                    userId={userId}
-                    handleDeductCredits={handleDeductCredits}
-                    onNpcCreated={handleNpcCreated}
-                />
-            </div>
-        );
     } else {
         // Empty state
         rightPanelContent = (
@@ -3283,17 +3268,31 @@ const NPCGeneratorChatbot = ({ user, impersonatedUserId, onShowAdmin }) => {
                 )}
 
                 <div className="flex-1 overflow-hidden">
-                    {mobileView === 'list' || (!selectedNpc && !showCreateForm) ? (
+                    {mobileView === 'list' || !selectedNpc ? (
                         // Show NPC list
                         leftPanelContent
-                    ) : showCreateForm ? (
-                        // Show create form
-                        rightPanelContent
                     ) : (
                         // Show NPC details or conversation
                         rightPanelContent
                     )}
                 </div>
+
+                {showGoldStore && (
+                    <GoldStoreModal
+                        userId={userId}
+                        onClose={handleCloseGoldStore}
+                    />
+                )}
+
+                {showCreateForm && (
+                    <NpcCreation
+                        db={db}
+                        userId={userId}
+                        handleDeductCredits={handleDeductCredits}
+                        onNpcCreated={handleNpcCreated}
+                        onCancel={() => setShowCreateForm(false)}
+                    />
+                )}
             </div>
         );
     }
@@ -3340,6 +3339,16 @@ const NPCGeneratorChatbot = ({ user, impersonatedUserId, onShowAdmin }) => {
                 <GoldStoreModal
                     userId={userId}
                     onClose={handleCloseGoldStore}
+                />
+            )}
+
+            {showCreateForm && (
+                <NpcCreation
+                    db={db}
+                    userId={userId}
+                    handleDeductCredits={handleDeductCredits}
+                    onNpcCreated={handleNpcCreated}
+                    onCancel={() => setShowCreateForm(false)}
                 />
             )}
 
