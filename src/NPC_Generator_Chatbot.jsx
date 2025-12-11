@@ -11,7 +11,7 @@ import {
     getFieldRegenerationPrompt,
     getFieldExpansionPrompt,
     getVoiceRegenerationPrompt
-} from './constants/prompts';
+} from './prompts';
 import { collection, deleteDoc, doc, getDocs, onSnapshot, orderBy, query, setDoc, updateDoc, where } from 'firebase/firestore';
 import { getDownloadURL, ref, uploadString } from 'firebase/storage';
 import { auth, db, storage } from './firebaseConfig';
@@ -60,7 +60,7 @@ const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__f
 const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
 
 
-import { AVAILABLE_VOICES, getVoiceById } from './constants/voices';
+import { AVAILABLE_VOICES, getVoiceById } from './voices';
 import {
     generateStructuredNPC,
     generateScene,

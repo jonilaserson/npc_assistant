@@ -146,12 +146,14 @@ netlify deploy --prod
 
 ## 📁 Project Structure
 
-```
 npc_assistant/
 ├── src/
-│   ├── NPC_Generator_Chatbot.jsx  # Main application component
+│   ├── components.jsx             # All UI components
+│   ├── services.js                # Consolidated services (API, AI, Auth, DB)
+│   ├── NPC_Generator_Chatbot.jsx  # Main application logic
 │   ├── firebaseConfig.js          # Firebase initialization
 │   ├── voices.js                  # Voice configuration
+│   ├── prompts.js                 # AI prompt templates
 │   └── main.jsx                   # Entry point
 ├── netlify/
 │   └── functions/
@@ -160,9 +162,7 @@ npc_assistant/
 │       ├── elevenlabs-tts.js      # ElevenLabs TTS proxy
 │       └── delete-image.js        # Cloudinary cleanup
 ├── firestore.rules                # Firestore security rules
-├── voices.json                    # Voice library data
 └── netlify.toml                   # Netlify configuration
-```
 
 ---
 

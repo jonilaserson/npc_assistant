@@ -1,7 +1,7 @@
 import { doc, getDoc, setDoc, runTransaction, serverTimestamp } from 'firebase/firestore';
 import { db } from './firebaseConfig';
 import * as Sentry from "@sentry/react";
-import { AVAILABLE_VOICES, getVoiceById } from './constants/voices';
+import { AVAILABLE_VOICES, getVoiceById } from './voices';
 import {
     getStructuredNPCPrompt,
     getSceneGenerationPrompt,
@@ -12,7 +12,7 @@ import {
     getFieldRegenerationPrompt,
     getFieldExpansionPrompt,
     getVoiceRegenerationPrompt
-} from './constants/prompts';
+} from './prompts';
 
 // ==========================================
 // API Utilities
