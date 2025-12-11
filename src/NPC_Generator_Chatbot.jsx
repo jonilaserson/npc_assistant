@@ -16,11 +16,10 @@ import { collection, deleteDoc, doc, getDocs, onSnapshot, orderBy, query, setDoc
 import { getDownloadURL, ref, uploadString } from 'firebase/storage';
 import { auth, db, storage } from './firebaseConfig';
 import { Loader2, Zap, Brain, Wand2, MessageSquare, List, Send, Volume2, VolumeX, User, ChevronsDown, ChevronsUp, RefreshCw, Trash2, X, ChevronLeft, ChevronRight, Plus, GripVertical, Check, RotateCcw, Edit2, Eye, EyeOff, Sparkles, Maximize2, Play, Share2, AlertTriangle, Coins } from 'lucide-react';
-import { FeedbackButton } from './components/FeedbackButton';
+import { FeedbackButton, GoldStoreModal } from './components';
 import { logUsage } from './analytics';
 import * as Sentry from "@sentry/react";
 import { getCredits, deductCredits } from './services/creditService';
-import GoldStoreModal from './components/GoldStoreModal';
 import { useEscapeKey } from './hooks/useEscapeKey';
 
 const magicalStyles = `

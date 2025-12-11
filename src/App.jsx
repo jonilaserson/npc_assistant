@@ -2,10 +2,8 @@ import React, { useEffect, useState } from 'react';
 import { onAuthStateChanged } from 'firebase/auth';
 import * as Sentry from "@sentry/react";
 import { auth } from './firebaseConfig';
-import Login from './components/Login';
+import { Login, AdminDashboard, LegalAgreementModal } from './components';
 import NPC_Generator_Chatbot from './NPC_Generator_Chatbot';
-import { AdminDashboard } from './components/AdminDashboard';
-import LegalAgreementModal from './components/LegalAgreementModal';
 import { trackUser } from './analytics';
 import { checkTermsAccepted, acceptTerms } from './services/userService';
 
