@@ -19,8 +19,8 @@ import { Loader2, Zap, Brain, Wand2, MessageSquare, List, Send, Volume2, VolumeX
 import { FeedbackButton, GoldStoreModal } from './components';
 import { logUsage } from './analytics';
 import * as Sentry from "@sentry/react";
-import { getCredits, deductCredits } from './services/creditService';
-import { useEscapeKey } from './hooks/useEscapeKey';
+import { getCredits, deductCredits } from './services';
+import { useEscapeKey } from './components';
 
 const magicalStyles = `
 @keyframes magic-wiggle {
@@ -61,8 +61,6 @@ const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial
 
 
 import { AVAILABLE_VOICES, getVoiceById } from './constants/voices';
-import { fetchWithBackoff } from './utils/apiUtils';
-import { textToSpeech, regenerateVoice, selectVoice, selectVoiceFromCandidates } from './services/audioService';
 import {
     generateStructuredNPC,
     generateScene,
@@ -70,12 +68,12 @@ import {
     getNPCResponse,
     parseGoalFromScene,
     regenerateNPCField,
-    expandNPCField
-} from './services/aiGenerator';
-
-
-
-
+    expandNPCField,
+    regenerateVoice,
+    textToSpeech,
+    selectVoice,
+    selectVoiceFromCandidates
+} from './services';
 
 
 // --- Firebase Setup and Custom Hooks ---

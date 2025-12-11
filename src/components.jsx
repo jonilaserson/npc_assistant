@@ -4,8 +4,29 @@ import { signInWithPopup } from 'firebase/auth';
 import { db, auth, googleProvider } from './firebaseConfig';
 import { Users, DollarSign, Image, UserCircle, ArrowLeft, Eye, Loader2, Volume2, UserPlus, MessageSquare, X, Send, Coins } from 'lucide-react';
 import { formatDistanceToNow, format, isWithinInterval, subHours } from 'date-fns';
-import { useEscapeKey } from './hooks/useEscapeKey';
-import { getCredits, addCredits } from './services/creditService';
+import { getCredits, addCredits } from './services';
+
+// --- Custom Hooks ---
+
+/**
+ * Custom hook to handle ESC key press
+ * @param {Function} onEscape - Callback function to execute when ESC is pressed
+ * @param {boolean} enabled - Whether the hook is enabled (default: true)
+ */
+export const useEscapeKey = (onEscape, enabled = true) => {
+    useEffect(() => {
+        if (!enabled || !onEscape) return;
+
+        const handleEscape = (e) => {
+            if (e.key === 'Escape') {
+                onEscape();
+            }
+        };
+
+        window.addEventListener('keydown', handleEscape);
+        return () => window.removeEventListener('keydown', handleEscape);
+    }, [onEscape, enabled]);
+};
 
 // --- Login Component ---
 export const Login = () => {

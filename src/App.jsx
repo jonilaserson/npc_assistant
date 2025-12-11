@@ -5,7 +5,7 @@ import { auth } from './firebaseConfig';
 import { Login, AdminDashboard, LegalAgreementModal } from './components';
 import NPC_Generator_Chatbot from './NPC_Generator_Chatbot';
 import { trackUser } from './analytics';
-import { checkTermsAccepted, acceptTerms } from './services/userService';
+import { checkTermsAccepted, acceptTerms } from './services';
 
 const App = () => {
     const [user, setUser] = useState(null);
