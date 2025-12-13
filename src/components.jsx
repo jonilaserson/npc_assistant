@@ -299,8 +299,8 @@ export const GoldStoreModal = ({ userId, onClose }) => {
                 <div className="space-y-3 mb-8">
                     <h3 className="text-white font-semibold border-b border-gray-700 pb-2">Price List</h3>
                     <div className="flex justify-between items-center text-gray-300">
-                        <span>Generare NPC</span>
-                        <span className="text-yellow-400 font-mono">1 Gold</span>
+                        <span>Generate NPC</span>
+                        <span className="text-green-400 font-mono font-bold">Free</span>
                     </div>
                     <div className="flex justify-between items-center text-gray-300">
                         <span>Audio Output</span>

@@ -1,50 +1,36 @@
 import crypto from 'crypto';
+import { CORS_HEADERS, deductCredits, requireAuthAndCredits } from './utils/firebase';
 
 export default async (req, context) => {
+    if (req.method === "OPTIONS") {
+        return new Response(null, { status: 204, headers: CORS_HEADERS });
+    }
+
     if (req.method !== "POST") {
-        return new Response("Method Not Allowed", { status: 405 });
+        return new Response("Method Not Allowed", { status: 405, headers: CORS_HEADERS });
     }
 
     try {
-        const { prompt, npcId, isInitial = false } = await req.json();
+        const cost = 5; // Fixed cost for high-quality DALL-E 3
+
+        // 1. Verify Authentication & Credits
+        const { user: authUser, errorResponse } = await requireAuthAndCredits(req, cost);
+        if (errorResponse) return errorResponse;
+
+        const userId = authUser.userId;
+        const { prompt, npcId } = await req.json();
         const openaiApiKey = process.env.OPENAI_API_KEY;
         const cloudinaryCloudName = process.env.CLOUDINARY_CLOUD_NAME;
         const cloudinaryApiKey = process.env.CLOUDINARY_API_KEY;
         const cloudinaryApiSecret = process.env.CLOUDINARY_API_SECRET;
 
         if (!openaiApiKey || !cloudinaryCloudName || !cloudinaryApiKey || !cloudinaryApiSecret) {
-            console.error("Missing env vars:", {
-                hasOpenAI: !!openaiApiKey,
-                hasCloudName: !!cloudinaryCloudName,
-                hasCloudKey: !!cloudinaryApiKey,
-                hasCloudSecret: !!cloudinaryApiSecret
-            });
-            return new Response(JSON.stringify({ error: "Missing Server Configuration" }), { status: 500 });
+            return new Response(JSON.stringify({ error: "Missing Server Configuration" }), { status: 500, headers: CORS_HEADERS });
         }
 
-        // 1. Generate Image with appropriate model and size
-        let payload;
-        if (isInitial) {
-            // Initial generation: DALL-E 2 with 256x256
-            console.log('Generating initial image with DALL-E 2 (256x256)...');
-            payload = {
-                model: "dall-e-2",
-                prompt: prompt,
-                size: "256x256",
-                n: 1
-            };
-        } else {
-            // Regeneration: DALL-E 3 with 1024x1024 high quality
-            console.log('Generating high-quality image with DALL-E 3 (1024x1024)...');
-            payload = {
-                model: "dall-e-3",
-                prompt: prompt,
-                n: 1,
-                size: "1024x1024",
-                quality: "standard",
-                style: "vivid"
-            };
-        }
+        // 3. Generate Image (DALL-E 3 Only)
+        console.log('Generating high-quality image with DALL-E 3 (1024x1024)...');
+        const payload = { model: "dall-e-3", prompt: prompt, n: 1, size: "1024x1024", quality: "standard", style: "vivid" };
 
         const dalleResponse = await fetch('https://api.openai.com/v1/images/generations', {
             method: 'POST',
@@ -60,14 +46,12 @@ export default async (req, context) => {
             throw new Error("DALL-E generation failed: " + JSON.stringify(dalleResult));
         }
         const imageUrl = dalleResult.data[0].url;
-        console.log("DALL-E generated image URL:", imageUrl);
 
-        // 2. Upload to Cloudinary
+        // 4. Upload to Cloudinary
         console.log("Uploading to Cloudinary...");
         const timestamp = Math.round(Date.now() / 1000);
         const publicId = `npcs/images/${npcId}`;
         const paramsToSign = `overwrite=true&public_id=${publicId}&timestamp=${timestamp}${cloudinaryApiSecret}`;
-
         const signature = crypto.createHash('sha256').update(paramsToSign).digest('hex');
 
         const formData = new FormData();
@@ -89,17 +73,20 @@ export default async (req, context) => {
             throw new Error("Cloudinary upload failed: " + JSON.stringify(cloudinaryResult));
         }
 
-        console.log("Cloudinary upload success:", cloudinaryResult.secure_url);
+        // 5. Deduct Credits (Atomic) - Post-Success
+        const { newBalance } = await deductCredits(userId, cost);
 
         return new Response(JSON.stringify({
             secure_url: cloudinaryResult.secure_url,
-            public_id: cloudinaryResult.public_id
+            public_id: cloudinaryResult.public_id,
+            credits_deducted: cost,
+            new_balance: newBalance
         }), {
-            headers: { "Content-Type": "application/json" }
+            headers: CORS_HEADERS
         });
 
     } catch (error) {
         console.error("Generate Image Function Error:", error);
-        return new Response(JSON.stringify({ error: error.message }), { status: 500 });
+        return new Response(JSON.stringify({ error: error.message }), { status: 500, headers: CORS_HEADERS });
     }
 };

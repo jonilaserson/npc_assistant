@@ -1,5 +1,5 @@
 import { doc, getDoc, setDoc, runTransaction, serverTimestamp } from 'firebase/firestore';
-import { db } from './firebaseConfig';
+import { db, auth } from './firebaseConfig';
 import * as Sentry from "@sentry/react";
 import { AVAILABLE_VOICES, getVoiceById } from './voices';
 import {
@@ -131,72 +131,47 @@ export const getCredits = async (userId) => {
  * @param {number} amount 
  * @returns {Promise<number>} New balance
  */
-export const addCredits = async (userId, amount) => {
-    if (!userId || amount <= 0) return;
-    const userRef = doc(db, USERS_COLLECTION, userId);
-
+// Helper to call backend for credits
+const callCreditEndpoint = async (action, amount) => {
     try {
-        const newBalance = await runTransaction(db, async (transaction) => {
-            const userDoc = await transaction.get(userRef);
-            if (!userDoc.exists()) {
-                // Should not happen for logged in users mostly, but auto-create?
-                const initial = 100 + amount;
-                transaction.set(userRef, { credits: initial, createdAt: serverTimestamp() }, { merge: true });
-                return initial;
-            }
+        const user = auth.currentUser;
+        if (!user) throw new Error("User not authenticated");
 
-            const data = userDoc.data();
-            const current = typeof data.credits === 'number' ? data.credits : 100;
-            const updated = current + amount;
+        const token = await user.getIdToken();
 
-            transaction.update(userRef, { credits: updated });
-            return updated;
+        const response = await fetch('/.netlify/functions/manage-credits', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
+            },
+            body: JSON.stringify({ action, amount })
         });
-        return newBalance;
+
+        if (!response.ok) {
+            const err = await response.json();
+            throw new Error(err.error || 'Failed to update credits');
+        }
+
+        const data = await response.json();
+        return data.newBalance;
     } catch (error) {
-        console.error("Error adding credits:", error);
+        console.error("Credit API Error:", error);
         throw error;
     }
 };
 
 /**
- * Deduct credits from a user's balance safely.
- * Throws an error if insufficient funds.
- * @param {string} userId 
- * @param {number} amount 
+ * Add credits to a user's account via secure backend
+ * @param {string} userId - (Ignored in favor of auth token)
+ * @param {number} amount
  * @returns {Promise<number>} New balance
  */
-export const deductCredits = async (userId, amount) => {
-    if (!userId || amount <= 0) return;
-    const userRef = doc(db, USERS_COLLECTION, userId);
-
-    try {
-        const newBalance = await runTransaction(db, async (transaction) => {
-            const userDoc = await transaction.get(userRef);
-            if (!userDoc.exists()) {
-                throw new Error("User does not exist");
-            }
-
-            const data = userDoc.data();
-            const current = typeof data.credits === 'number' ? data.credits : 100;
-
-            // CHECK DISABLED: allow proceeding even if insufficient funds
-            // if (current < amount) {
-            //     throw new Error("Insufficient funds");
-            // }
-
-            // Prevent going below 0
-            const updated = Math.max(0, current - amount);
-
-            transaction.update(userRef, { credits: updated });
-            return updated;
-        });
-        return newBalance;
-    } catch (error) {
-        // Propagate error so UI can show message
-        throw error;
-    }
+export const addCredits = async (userId, amount) => {
+    return callCreditEndpoint('add', amount);
 };
+
+
 
 // ==========================================
 // Audio Service
@@ -372,10 +347,17 @@ export const regenerateVoice = async (structuredData) => {
 
     const apiUrl = `/.netlify/functions/gemini`;
 
+    const user = auth.currentUser;
+    if (!user) throw new Error("User not authenticated");
+    const token = await user.getIdToken();
+
     try {
         const response = await fetchWithBackoff(apiUrl, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
+            },
             body: JSON.stringify(payload)
         });
         const result = await response.json();
@@ -422,9 +404,16 @@ const geminiTTS = async (text, voiceName) => {
 
     const apiUrl = `/.netlify/functions/gemini`;
 
+    const user = auth.currentUser;
+    if (!user) throw new Error("User not authenticated");
+    const token = await user.getIdToken();
+
     const response = await fetchWithBackoff(apiUrl, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+        },
         body: JSON.stringify(payload)
     });
     const result = await response.json();
@@ -503,7 +492,10 @@ export const textToSpeech = async (text, structuredData) => {
         }
         const byteArray = new Uint8Array(byteNumbers);
         const blob = new Blob([byteArray], { type: 'audio/mpeg' });
-        return URL.createObjectURL(blob);
+        return {
+            audioUrl: URL.createObjectURL(blob),
+            new_balance: data.new_balance
+        };
     };
 
     try {
@@ -512,16 +504,30 @@ export const textToSpeech = async (text, structuredData) => {
         if (voiceData.provider === 'gemini') {
             return await geminiTTS(dialogueOnly, voiceData.id);
         } else if (voiceData.provider === 'elevenlabs') {
+            const user = auth.currentUser;
+            if (!user) throw new Error("User not authenticated");
+            const token = await user.getIdToken();
+
             const response = await fetchWithBackoff('/.netlify/functions/elevenlabs-tts', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`
+                },
                 body: JSON.stringify({ text: dialogueOnly, voiceId: voiceData.id })
             });
             return await processTTSResponse(response);
         } else if (voiceData.provider === 'google') {
+            const user = auth.currentUser;
+            if (!user) throw new Error("User not authenticated");
+            const token = await user.getIdToken();
+
             const response = await fetchWithBackoff('/.netlify/functions/google-tts', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`
+                },
                 body: JSON.stringify({ text: dialogueOnly, voiceId: voiceData.id })
             });
             return await processTTSResponse(response);
@@ -584,10 +590,17 @@ export const generateStructuredNPC = async (description) => {
 
     const apiUrl = `/.netlify/functions/gemini`;
 
+    const user = auth.currentUser;
+    if (!user) throw new Error("User not authenticated");
+    const token = await user.getIdToken();
+
     try {
         const response = await fetchWithBackoff(apiUrl, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
+            },
             body: JSON.stringify(payload)
         });
         const result = await response.json();
@@ -633,10 +646,17 @@ export const generateScene = async (npcData, conversationHistory = null) => {
 
     const apiUrl = `/.netlify/functions/gemini`;
 
+    const user = auth.currentUser;
+    if (!user) throw new Error("User not authenticated");
+    const token = await user.getIdToken();
+
     try {
         const response = await fetchWithBackoff(apiUrl, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
+            },
             body: JSON.stringify(payload)
         });
         const result = await response.json();
@@ -654,7 +674,7 @@ export const generateScene = async (npcData, conversationHistory = null) => {
  * Uses a two-step process: first asks an LLM to create the perfect DALL-E prompt,
  * then generates the image with that optimized prompt.
  */
-export const generateNPCImage = async (name, raceClass, visualDescription, gender, ageRange, personality, npcId, isInitial = false) => {
+export const generateNPCImage = async (name, raceClass, visualDescription, gender, ageRange, personality, npcId) => {
     // Step 1: Ask the LLM to act as a DALL-E artist and create the perfect prompt
     console.log(`\n%c[NPC Generator] Step 1: Asking LLM to create optimized DALL-E prompt...`, 'color: magenta; font-weight: bold;');
 
@@ -671,11 +691,18 @@ export const generateNPCImage = async (name, raceClass, visualDescription, gende
 
     const geminiApiUrl = `/.netlify/functions/gemini`;
 
+    const user = auth.currentUser;
+    if (!user) throw new Error("User not authenticated");
+    const token = await user.getIdToken();
+
     let optimizedPrompt;
     try {
         const promptResponse = await fetchWithBackoff(geminiApiUrl, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
+            },
             body: JSON.stringify(promptPayload)
         });
         const promptResult = await promptResponse.json();
@@ -697,20 +724,24 @@ export const generateNPCImage = async (name, raceClass, visualDescription, gende
     console.log('----------------------------------------\n');
 
     // Step 2: Use the optimized prompt with the appropriate model
-    console.log(`%c[NPC Generator] Step 2: Generating ${isInitial ? 'initial (DALL-E 2, 256x256)' : 'high-quality (DALL-E 3, 1024x1024)'} image...`, 'color: green; font-weight: bold;');
+    console.log(`%c[NPC Generator] Step 2: Generating high-quality (DALL-E 3, 1024x1024) image...`, 'color: green; font-weight: bold;');
 
     const apiUrl = '/.netlify/functions/generate-image';
 
     try {
+        const user = auth.currentUser;
+        if (!user) throw new Error("User not authenticated");
+        const token = await user.getIdToken();
+
         const response = await fetch(apiUrl, {
             method: 'POST',
             headers: {
-                'Content-Type': 'application/json'
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
             },
             body: JSON.stringify({
                 prompt: optimizedPrompt,
-                npcId: npcId,
-                isInitial: isInitial
+                npcId: npcId
             })
         });
 
@@ -760,10 +791,17 @@ export const getNPCResponse = async (structuredData, chatHistory, currentGoal = 
 
     const apiUrl = `/.netlify/functions/gemini`;
 
+    const user = auth.currentUser;
+    if (!user) throw new Error("User not authenticated");
+    const token = await user.getIdToken();
+
     try {
         const response = await fetchWithBackoff(apiUrl, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
+            },
             body: JSON.stringify(payload)
         });
         const result = await response.json();
@@ -859,10 +897,17 @@ export const regenerateNPCField = async (structuredData, field) => {
 
     const apiUrl = `/.netlify/functions/gemini`;
 
+    const user = auth.currentUser;
+    if (!user) throw new Error("User not authenticated");
+    const token = await user.getIdToken();
+
     try {
         const response = await fetchWithBackoff(apiUrl, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
+            },
             body: JSON.stringify(payload)
         });
         const result = await response.json();
@@ -888,10 +933,17 @@ export const expandNPCField = async (structuredData, field) => {
 
     const apiUrl = `/.netlify/functions/gemini`;
 
+    const user = auth.currentUser;
+    if (!user) throw new Error("User not authenticated");
+    const token = await user.getIdToken();
+
     try {
         const response = await fetchWithBackoff(apiUrl, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
+            },
             body: JSON.stringify(payload)
         });
         const result = await response.json();

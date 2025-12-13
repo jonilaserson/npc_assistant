@@ -19,7 +19,7 @@ import { Loader2, Zap, Brain, Wand2, MessageSquare, List, Send, Volume2, VolumeX
 import { FeedbackButton, GoldStoreModal } from './components';
 import { logUsage } from './analytics';
 import * as Sentry from "@sentry/react";
-import { getCredits, deductCredits } from './services';
+import { getCredits } from './services';
 import { useEscapeKey } from './components';
 
 const magicalStyles = `
@@ -604,7 +604,7 @@ const LoadingIndicator = () => (
     </div>
 );
 
-const NpcCreation = ({ db, userId, onNpcCreated, handleDeductCredits, onCancel }) => {
+const NpcCreation = ({ db, userId, onNpcCreated, onCancel }) => {
     const [rawDescription, setRawDescription] = useState('');
     const [isGenerating, setIsGenerating] = useState(false);
     const [status, setStatus] = useState('');
@@ -622,8 +622,6 @@ const NpcCreation = ({ db, userId, onNpcCreated, handleDeductCredits, onCancel }
         setStatus('Generating NPC profile...');
 
         try {
-            // Check and deduct credits (1 Gold)
-            await handleDeductCredits(1);
 
             // Step 1: Generate structured data
             const structuredData = await generateStructuredNPC(rawDescription);
@@ -1169,7 +1167,7 @@ const ShareNPCModal = ({ isOpen, onClose, npc, db, userId, userEmail }) => {
     );
 };
 
-const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileView = 'details', onShowConversation, onShowDetails, currentTip, handleDeductCredits }) => {
+const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileView = 'details', onShowConversation, onShowDetails, currentTip, updateCreditUI }) => {
 
 
     const [message, setMessage] = useState('');
@@ -1356,13 +1354,25 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
                 audioUrl = audioCache[text];
             } else {
                 // Generate TTS using the NPC's structured data for voice selection
-                // Deduct credits (2 Gold) for NEW generation
-                await handleDeductCredits(2);
+                // Backend now handles deduction and returns { audioUrl, new_balance } or just audioUrl string (legacy)
+                const result = await textToSpeech(text, npc.structuredData);
 
-                audioUrl = await textToSpeech(text, npc.structuredData);
+                let newBalance;
+
+                if (typeof result === 'object' && result.audioUrl) {
+                    audioUrl = result.audioUrl;
+                    newBalance = result.new_balance;
+                } else {
+                    audioUrl = result;
+                }
 
                 if (!audioUrl) {
                     throw new Error('TTS returned empty audio URL');
+                }
+
+                // Update UI credits if backend returned new balance
+                if (newBalance !== undefined) {
+                    updateCreditUI(newBalance);
                 }
 
                 // Log TTS usage for analytics
@@ -1398,6 +1408,9 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
                 // Don't revoke cached URLs - keep them for replay
             };
             audioPlayer.onerror = (e) => {
+                // Ignore empty src errors which happen when stopping audio
+                if (!audioPlayer.src || audioPlayer.error?.code === MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED) return;
+
                 console.error("Audio playback error:", audioPlayer.error?.message || e);
                 setPlayingMessageIndex(null);
             };
@@ -1784,16 +1797,21 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
     const handleRegenerateImage = async () => {
         setIsImageGenerating(true);
         try {
-            // Deduct credits (5 Gold)
-            await handleDeductCredits(5);
+
 
             const data = npc.structuredData;
 
             // Step 1: Generate image with DALL-E 3 and upload to Cloudinary (via backend)
-            const { secure_url, public_id } = await generateNPCImage(data.name, data.raceClass, data.visual, data.gender, data.ageRange, data.personality, npc.id);
+            const { secure_url, public_id, new_balance, credits_deducted } = await generateNPCImage(data.name, data.raceClass, data.visual, data.gender, data.ageRange, data.personality, npc.id);
 
             const cloudinaryUrl = secure_url;
             const cloudinaryImageId = public_id;
+
+            // Update credits if returned from backend and deduction occurred
+            // Update credits if returned from backend and deduction occurred
+            if (new_balance !== undefined && credits_deducted > 0) {
+                updateCreditUI(new_balance);
+            }
 
             // Log analytics
             await logUsage(userId, userEmail, 'dalle', {
@@ -1807,6 +1825,7 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
             // Step 4: Update the NPC in Firestore with the new Cloudinary URL
             if (db) {
                 try {
+
                     const npcRef = doc(db, npcCollectionPath(appId, userId), npc.id);
                     await updateDoc(npcRef, {
                         imageUrl: cloudinaryUrl,
@@ -2756,9 +2775,15 @@ const CompactNpcList = ({ npcs, sharedNpcs = [], selectedNpcId, onNpcSelected, o
         console.log(`[${new Date().toISOString()}] Deleting image from Cloudinary: ${publicId}`);
 
         try {
+            const user = auth.currentUser;
+            const token = user ? await user.getIdToken() : null;
+
             const response = await fetch('/.netlify/functions/delete-image', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`
+                },
                 body: JSON.stringify({ publicId })
             });
 
@@ -2919,9 +2944,15 @@ const NpcList = ({ npcs, onNpcSelected, db, userId, loading }) => {
         console.log(`[${new Date().toISOString()}] Deleting image from Cloudinary: ${publicId}`);
 
         try {
+            const user = auth.currentUser;
+            const token = user ? await user.getIdToken() : null;
+
             const response = await fetch('/.netlify/functions/delete-image', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`
+                },
                 body: JSON.stringify({ publicId })
             });
 
@@ -3052,13 +3083,16 @@ const NPCGeneratorChatbot = ({ user, impersonatedUserId, onShowAdmin }) => {
         }
     }, [userId]);
 
-    // Wrapper for deducting credits with animation and state update
-    const handleDeductCredits = async (amount) => {
-        const newBalance = await deductCredits(userId, amount);
-        setCredits(newBalance); // Update displayed balance
-        setIsGoldGlittering(true);
-        setTimeout(() => setIsGoldGlittering(false), 500);
+    // Wrapper for updating credits with animation from backend
+    const updateCreditUI = (newBalance) => {
+        if (newBalance !== undefined) {
+            setCredits(newBalance); // Update displayed balance
+            setIsGoldGlittering(true);
+            setTimeout(() => setIsGoldGlittering(false), 500);
+        }
     };
+
+
 
     const handleCloseGoldStore = () => {
         setShowGoldStore(false);
@@ -3196,7 +3230,8 @@ const NPCGeneratorChatbot = ({ user, impersonatedUserId, onShowAdmin }) => {
                 onShowConversation={handleShowConversation}
                 onShowDetails={handleShowDetails}
                 currentTip={TIPS[currentTipIndex]}
-                handleDeductCredits={handleDeductCredits}
+
+                updateCreditUI={updateCreditUI}
             />
         );
     } else {
@@ -3285,7 +3320,6 @@ const NPCGeneratorChatbot = ({ user, impersonatedUserId, onShowAdmin }) => {
                     <NpcCreation
                         db={db}
                         userId={userId}
-                        handleDeductCredits={handleDeductCredits}
                         onNpcCreated={handleNpcCreated}
                         onCancel={() => setShowCreateForm(false)}
                     />
@@ -3343,7 +3377,7 @@ const NPCGeneratorChatbot = ({ user, impersonatedUserId, onShowAdmin }) => {
                 <NpcCreation
                     db={db}
                     userId={userId}
-                    handleDeductCredits={handleDeductCredits}
+
                     onNpcCreated={handleNpcCreated}
                     onCancel={() => setShowCreateForm(false)}
                 />
