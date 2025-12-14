@@ -3,12 +3,12 @@
 // Gemini voices with their original descriptors
 const GEMINI_VOICES = [
     { name: "Achernar", gender: "Male", age: "Adult", descriptors: "Friendly, Engaging, Enthusiastic" },
-    { name: "Achird", gender: "Female", age: "Young", descriptors: "Inquisitive, Friendly, Breathy" },
+    { name: "Achird", gender: "Male", age: "Mature", descriptors: "Deep, Resonant, Wise, Calm" },
     { name: "Algenib", gender: "Female", age: "Mature", descriptors: "Warm, Confident, Authoritative" },
     { name: "Algieba", gender: "Male", age: "Adult", descriptors: "Deep, Resonant" },
     { name: "Alnilam", gender: "Male", age: "Adult", descriptors: "Energetic, Exciting, Direct" },
     { name: "Aoede", gender: "Female", age: "Adult", descriptors: "Clear, Conversational, Thoughtful, Intelligent" },
-    { name: "Autonoe", gender: "Male", age: "Mature", descriptors: "Deep, Resonant, Wise, Calm" },
+    { name: "Autonoe", gender: "Female", age: "Young", descriptors: "Inquisitive, Friendly, Breathy" },
     { name: "Callirrhoe", gender: "Female", age: "Adult", descriptors: "Confident, Professional, Articulate" },
     { name: "Charon", gender: "Male", age: "Adult", descriptors: "Smooth, Conversational, Trustworthy, Gentle" },
     { name: "Despina", gender: "Female", age: "Adult", descriptors: "Warm, Inviting, Friendly, Smooth" },

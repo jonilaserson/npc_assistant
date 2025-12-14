@@ -1,17 +1,10 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { onAuthStateChanged, signInAnonymously, signInWithCustomToken } from 'firebase/auth';
-import {
-    TIPS,
-    getStructuredNPCPrompt,
-    getSceneGenerationPrompt,
-    getImageGenerationPrompt,
-    getImageSystemInstruction,
-    getImageFallbackPrompt,
-    getRoleplaySystemPrompt,
-    getFieldRegenerationPrompt,
-    getFieldExpansionPrompt,
-    getVoiceRegenerationPrompt
-} from './prompts';
+const TIPS = [
+    { text: 'Type', code: '/scene', suffix: 'to set a scene at any time' },
+    { text: 'Describe your character\'s actions using square brackets', code: '[like this]', suffix: '' },
+    { text: 'Try typing', code: '[Describe the NPC\'s internal monologue]', suffix: '— you might be surprised!' },
+];
 import { collection, deleteDoc, doc, getDocs, onSnapshot, orderBy, query, setDoc, updateDoc, where } from 'firebase/firestore';
 import { getDownloadURL, ref, uploadString } from 'firebase/storage';
 import { auth, db, storage } from './firebaseConfig';
@@ -1195,6 +1188,8 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
 
     // Cache for generated scenes: { [npcId]: "scene text" }
     const sceneCache = useRef({});
+    // Track all generated audio blobs for cleanup
+    const audioBlobsRef = useRef([]);
 
     // Ref for message input to maintain focus
     const messageInputRef = useRef(null);
@@ -1257,12 +1252,13 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
             return () => {
                 player.pause();
                 player.currentTime = 0;
-                // Clean up all cached audio Blob URLs
-                Object.values(audioCache).forEach(url => {
-                    if (url.startsWith('blob:')) {
+                // Clean up all cached audio Blob URLs tracked in ref
+                if (audioBlobsRef.current) {
+                    audioBlobsRef.current.forEach(url => {
                         URL.revokeObjectURL(url);
-                    }
-                });
+                    });
+                    audioBlobsRef.current = [];
+                }
                 if (player.src && player.src.startsWith('blob:')) {
                     URL.revokeObjectURL(player.src);
                 }
@@ -1394,11 +1390,16 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
             }
 
             // Clean up old blob URL if present
-            if (audioPlayer.src.startsWith('blob:')) {
-                URL.revokeObjectURL(audioPlayer.src);
-            }
+            // if (audioPlayer.src.startsWith('blob:')) {
+            //     URL.revokeObjectURL(audioPlayer.src);
+            // }
 
             audioPlayer.src = audioUrl;
+
+            // Track blob for cleanup
+            if (audioUrl.startsWith('blob:')) {
+                audioBlobsRef.current.push(audioUrl);
+            }
 
             // Play is now explicitly triggered by the user's click on the icon.
             await audioPlayer.play();

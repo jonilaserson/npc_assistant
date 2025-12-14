@@ -2,17 +2,8 @@ import { doc, getDoc, setDoc, runTransaction, serverTimestamp } from 'firebase/f
 import { db, auth } from './firebaseConfig';
 import * as Sentry from "@sentry/react";
 import { AVAILABLE_VOICES, getVoiceById } from './voices';
-import {
-    getStructuredNPCPrompt,
-    getSceneGenerationPrompt,
-    getImageGenerationPrompt,
-    getImageSystemInstruction,
-    getImageFallbackPrompt,
-    getRoleplaySystemPrompt,
-    getFieldRegenerationPrompt,
-    getFieldExpansionPrompt,
-    getVoiceRegenerationPrompt
-} from './prompts';
+
+
 
 // ==========================================
 // API Utilities
@@ -325,27 +316,12 @@ export const regenerateVoice = async (structuredData) => {
 
     const currentVoice = structuredData.voiceId?.split(' ')[0] || '';
 
-    const systemPrompt = getVoiceRegenerationPrompt(structuredData, AVAILABLE_VOICES);
-
     const payload = {
-        contents: [{ parts: [{ text: "Select new voice candidates for this character." }] }],
-        systemInstruction: { parts: [{ text: systemPrompt }] },
-        generationConfig: {
-            responseMimeType: "application/json",
-            responseSchema: {
-                type: "OBJECT",
-                properties: {
-                    candidates: {
-                        type: "ARRAY",
-                        items: { type: "STRING" },
-                        description: "List of the top 3 best matching voice names (e.g. ['Fenrir', 'Roger', 'Sarah'])."
-                    }
-                }
-            }
-        }
+        structuredData: structuredData,
+        availableVoices: AVAILABLE_VOICES
     };
 
-    const apiUrl = `/.netlify/functions/gemini`;
+    const apiUrl = `/.netlify/functions/regenerate-voice`;
 
     const user = auth.currentUser;
     if (!user) throw new Error("User not authenticated");
@@ -382,75 +358,6 @@ export const regenerateVoice = async (structuredData) => {
 };
 
 // --- TTS Logic ---
-
-/**
- * Gemini TTS implementation
- */
-const geminiTTS = async (text, voiceName) => {
-    const payload = {
-        contents: [{
-            parts: [{ text }]
-        }],
-        generationConfig: {
-            responseModalities: ["AUDIO"],
-            speechConfig: {
-                voiceConfig: {
-                    prebuiltVoiceConfig: { voiceName }
-                }
-            }
-        },
-        model: "gemini-2.5-flash-preview-tts"
-    };
-
-    const apiUrl = `/.netlify/functions/gemini`;
-
-    const user = auth.currentUser;
-    if (!user) throw new Error("User not authenticated");
-    const token = await user.getIdToken();
-
-    const response = await fetchWithBackoff(apiUrl, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify(payload)
-    });
-    const result = await response.json();
-
-    // Check for API errors
-    if (result.error) {
-        const errorMsg = result.error.message || 'Unknown API error';
-
-        console.error('Gemini TTS API Error Response:', result.error);
-
-        Sentry.captureException(new Error(`Gemini TTS API Error: ${errorMsg}`), {
-            tags: { feature: 'gemini_tts', api_error: true },
-            extra: { errorCode: result.error.code, errorMessage: errorMsg, voiceName, textLength: text.length }
-        });
-
-        if (result.error.code === 429) throw new Error('TTS quota exceeded. Please try again later.');
-        throw new Error('TTS service temporarily unavailable.');
-    }
-
-    const part = result?.candidates?.[0]?.content?.parts?.[0];
-    const audioData = part?.inlineData?.data;
-    const mimeType = part?.inlineData?.mimeType;
-
-    if (audioData && mimeType && mimeType.startsWith("audio/")) {
-        const rateMatch = mimeType.match(/rate=(\d+)/);
-        const sampleRate = rateMatch ? parseInt(rateMatch[1], 10) : 24000;
-
-        const pcmData = base64ToArrayBuffer(audioData);
-        const pcm16 = new Int16Array(pcmData);
-        const wavBlob = pcmToWav(pcm16, sampleRate);
-
-        return URL.createObjectURL(wavBlob);
-    } else {
-        console.error('Missing audio data or invalid mimeType:', { hasAudioData: !!audioData, mimeType });
-        throw new Error('Unable to generate audio. Please try again.');
-    }
-};
 
 /**
  * Main TTS entry point.
@@ -501,9 +408,7 @@ export const textToSpeech = async (text, structuredData) => {
     try {
         console.log(`%c[TTS] Generating audio using provider: ${voiceData.provider} (Voice: ${voiceData.name})`, 'color: #0ea5e9; font-weight: bold;');
 
-        if (voiceData.provider === 'gemini') {
-            return await geminiTTS(dialogueOnly, voiceData.id);
-        } else if (voiceData.provider === 'elevenlabs') {
+        if (voiceData.provider === 'elevenlabs') {
             const user = auth.currentUser;
             if (!user) throw new Error("User not authenticated");
             const token = await user.getIdToken();
@@ -559,36 +464,12 @@ export const generateStructuredNPC = async (description) => {
         throw new Error("Configuration Error: AVAILABLE_VOICES list is missing or empty.");
     }
 
-    const { userQuery, systemPrompt } = getStructuredNPCPrompt(description, AVAILABLE_VOICES);
-
     const payload = {
-        contents: [{ parts: [{ text: userQuery }] }],
-        systemInstruction: {
-            parts: [{
-                text: systemPrompt
-            }]
-        },
-        generationConfig: {
-            responseMimeType: "application/json",
-            responseSchema: {
-                type: "OBJECT",
-                properties: {
-                    name: { type: "STRING", description: "The NPC's full name or title." },
-                    raceClass: { type: "STRING", description: "The NPC's race and class/profession (e.g., 'Half-Elf Bard', 'Gnome Tinker', 'Human Guard')." },
-                    gender: { type: "STRING", description: "The NPC's gender, e.g., 'female', 'male', 'other'." },
-                    ageRange: { type: "STRING", description: "The NPC's general age range, e.g., 'adult','young adult', 'old', 'middle-aged', 'child'." },
-                    personality: { type: "STRING", description: "A concise, detailed summary of the NPC's disposition and mannerisms." },
-                    wants: { type: "STRING", description: "The NPC's primary goal or desire. Write one very short sentence." },
-                    secrets: { type: "STRING", description: "A key secret the NPC hides, critical for plot development. Write one very short sentence." },
-                    pitfalls: { type: "STRING", description: "One thing that may make the NPC lose patience, interest, or demand a clarification in the conversation. Write one very short sentence." },
-                    visual: { type: "STRING", description: "A detailed visual description of the NPC's physical appearance, clothing, and equipment." },
-                    voiceCandidates: { type: "ARRAY", items: { type: "STRING" }, description: "List of the top 3 best matching voice names (e.g. ['Fenrir', 'Roger', 'Sarah'])." }
-                }
-            }
-        }
+        description: description,
+        availableVoices: AVAILABLE_VOICES
     };
 
-    const apiUrl = `/.netlify/functions/gemini`;
+    const apiUrl = `/.netlify/functions/generate-npc`;
 
     const user = auth.currentUser;
     if (!user) throw new Error("User not authenticated");
@@ -637,14 +518,12 @@ export const generateStructuredNPC = async (description) => {
  * If conversationHistory is provided, the scene will build on the conversation.
  */
 export const generateScene = async (npcData, conversationHistory = null) => {
-    const systemPrompt = getSceneGenerationPrompt(npcData, conversationHistory);
-
     const payload = {
-        contents: [{ parts: [{ text: "Generate a scene." }] }],
-        systemInstruction: { parts: [{ text: systemPrompt }] }
+        npcData: npcData,
+        conversationHistory: conversationHistory
     };
 
-    const apiUrl = `/.netlify/functions/gemini`;
+    const apiUrl = `/.netlify/functions/generate-scene`;
 
     const user = auth.currentUser;
     if (!user) throw new Error("User not authenticated");
@@ -678,46 +557,27 @@ export const generateNPCImage = async (name, raceClass, visualDescription, gende
     // Step 1: Ask the LLM to act as a DALL-E artist and create the perfect prompt
     console.log(`\n%c[NPC Generator] Step 1: Asking LLM to create optimized DALL-E prompt...`, 'color: magenta; font-weight: bold;');
 
-    const promptCreationQuery = getImageGenerationPrompt(name, raceClass, visualDescription, gender, ageRange, personality);
-
-    const promptPayload = {
-        contents: [{ parts: [{ text: promptCreationQuery }] }],
-        systemInstruction: {
-            parts: [{
-                text: getImageSystemInstruction()
-            }]
-        }
-    };
-
-    const geminiApiUrl = `/.netlify/functions/gemini`;
-
     const user = auth.currentUser;
     if (!user) throw new Error("User not authenticated");
     const token = await user.getIdToken();
 
-    let optimizedPrompt;
-    try {
-        const promptResponse = await fetchWithBackoff(geminiApiUrl, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${token}`
-            },
-            body: JSON.stringify(promptPayload)
-        });
-        const promptResult = await promptResponse.json();
-        optimizedPrompt = promptResult.candidates?.[0]?.content?.parts?.[0]?.text;
+    const payload = {
+        name, raceClass, visualDescription, gender, ageRange, personality
+    };
 
-        if (!optimizedPrompt) {
-            console.warn("Could not generate optimized prompt, falling back to basic prompt");
-            const description = (visualDescription && visualDescription.trim()) ? visualDescription : personality;
-            optimizedPrompt = getImageFallbackPrompt(name, gender, ageRange, raceClass, description);
-        }
-    } catch (e) {
-        console.warn("Error generating optimized prompt, using fallback:", e);
-        const description = (visualDescription && visualDescription.trim()) ? visualDescription : personality;
-        optimizedPrompt = getImageFallbackPrompt(name, gender, ageRange, raceClass, description);
-    }
+    const response = await fetchWithBackoff('/.netlify/functions/optimize-image-prompt', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify(payload)
+    });
+    const result = await response.json();
+
+    if (result.error) throw new Error(result.error);
+
+    const optimizedPrompt = result.optimizedPrompt;
 
     console.log(`\n%c[NPC Generator] Optimized DALL-E Prompt:`, 'color: cyan; font-weight: bold;');
     console.log(optimizedPrompt);
@@ -729,10 +589,6 @@ export const generateNPCImage = async (name, raceClass, visualDescription, gende
     const apiUrl = '/.netlify/functions/generate-image';
 
     try {
-        const user = auth.currentUser;
-        if (!user) throw new Error("User not authenticated");
-        const token = await user.getIdToken();
-
         const response = await fetch(apiUrl, {
             method: 'POST',
             headers: {
@@ -776,20 +632,13 @@ export const generateNPCImage = async (name, raceClass, visualDescription, gende
  * Returns: string (if no goal) or { response: string, goalAchieved: boolean } (if goal provided)
  */
 export const getNPCResponse = async (structuredData, chatHistory, currentGoal = null) => {
-    let systemPrompt = getRoleplaySystemPrompt(structuredData, currentGoal);
-
-    // Map chat history to the required model format
-    const contents = chatHistory.map(msg => ({
-        role: msg.role === 'npc' ? 'model' : 'user',
-        parts: [{ text: msg.text }]
-    }));
-
     const payload = {
-        contents: contents,
-        systemInstruction: { parts: [{ text: systemPrompt }] }
+        structuredData: structuredData,
+        chatHistory: chatHistory,
+        currentGoal: currentGoal
     };
 
-    const apiUrl = `/.netlify/functions/gemini`;
+    const apiUrl = `/.netlify/functions/chat`;
 
     const user = auth.currentUser;
     if (!user) throw new Error("User not authenticated");
@@ -888,14 +737,13 @@ export const parseGoalFromScene = (sceneText) => {
  * Regenerates a specific field of the NPC profile based on the rest of the data.
  */
 export const regenerateNPCField = async (structuredData, field) => {
-    const systemPrompt = getFieldRegenerationPrompt(structuredData, field);
-
     const payload = {
-        contents: [{ parts: [{ text: "Regenerate this field." }] }],
-        systemInstruction: { parts: [{ text: systemPrompt }] }
+        action: 'regenerate',
+        structuredData: structuredData,
+        field: field
     };
 
-    const apiUrl = `/.netlify/functions/gemini`;
+    const apiUrl = `/.netlify/functions/modify-npc-field`;
 
     const user = auth.currentUser;
     if (!user) throw new Error("User not authenticated");
@@ -911,6 +759,7 @@ export const regenerateNPCField = async (structuredData, field) => {
             body: JSON.stringify(payload)
         });
         const result = await response.json();
+        // The backend returns the full Gemini structure, so we access it the same way
         const text = result.candidates?.[0]?.content?.parts?.[0]?.text;
         if (!text) throw new Error("Model returned no text response.");
         return text.trim();
@@ -924,14 +773,13 @@ export const regenerateNPCField = async (structuredData, field) => {
  * Expands a specific field of the NPC profile to be more detailed.
  */
 export const expandNPCField = async (structuredData, field) => {
-    const systemPrompt = getFieldExpansionPrompt(structuredData, field);
-
     const payload = {
-        contents: [{ parts: [{ text: "Expand this field." }] }],
-        systemInstruction: { parts: [{ text: systemPrompt }] }
+        action: 'expand',
+        structuredData: structuredData,
+        field: field
     };
 
-    const apiUrl = `/.netlify/functions/gemini`;
+    const apiUrl = `/.netlify/functions/modify-npc-field`;
 
     const user = auth.currentUser;
     if (!user) throw new Error("User not authenticated");
@@ -947,6 +795,7 @@ export const expandNPCField = async (structuredData, field) => {
             body: JSON.stringify(payload)
         });
         const result = await response.json();
+        // The backend returns the full Gemini structure, so we access it the same way
         const text = result.candidates?.[0]?.content?.parts?.[0]?.text;
         if (!text) throw new Error("Model returned no text response.");
         return text.trim();
