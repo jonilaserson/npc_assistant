@@ -385,7 +385,7 @@ export const AdminDashboard = ({ user, onExit, onImpersonate }) => {
         setLoading(true);
         try {
             // Load all users
-            const usersSnapshot = await getDocs(collection(db, 'all_users'));
+            const usersSnapshot = await getDocs(query(collection(db, 'all_users'), orderBy('lastSeen', 'desc')));
 
             // Fetch NPC counts for each user
             const usersDataPromises = usersSnapshot.docs.map(async doc => {
