@@ -89,10 +89,13 @@ export const hasEnoughCredits = async (userId, cost) => {
         const userRef = db.collection('all_users').doc(userId);
         const userDoc = await userRef.get();
 
-        if (!userDoc.exists) return false;
-
-        const data = userDoc.data();
-        const credits = (typeof data.credits === 'number') ? data.credits : 0;
+        let credits = 100; // Default to 100 for new users
+        if (userDoc.exists) {
+            const data = userDoc.data();
+            if (typeof data.credits === 'number') {
+                credits = data.credits;
+            }
+        }
 
         return credits >= cost;
     } catch (error) {
@@ -113,21 +116,23 @@ export const deductCredits = async (userId, cost) => {
     try {
         const newBalance = await db.runTransaction(async (transaction) => {
             const userDoc = await transaction.get(userRef);
-            let currentCredits = 0;
+            let currentCredits = 100; // Default to 100 for new users
+
             if (userDoc.exists) {
                 const data = userDoc.data();
-                currentCredits = (typeof data.credits === 'number') ? data.credits : 0;
-            } else {
-                // If user doc doesn't exist, create it with 0 credits
-                transaction.set(userRef, { credits: 0 }, { merge: true });
-                return 0;
+                if (typeof data.credits === 'number') {
+                    currentCredits = data.credits;
+                }
             }
+
+            // If user doc doesn't exist, we will set it below with the new balance
+
 
             // Deduct cost, clamp at 0
             let updatedCredits = currentCredits - cost;
             if (updatedCredits < 0) updatedCredits = 0;
 
-            transaction.update(userRef, { credits: updatedCredits });
+            transaction.set(userRef, { credits: updatedCredits }, { merge: true });
             return updatedCredits;
         });
 
