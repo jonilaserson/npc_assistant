@@ -45,7 +45,7 @@ Respond with ONLY the prompt text, nothing else.`;
 
         const systemInstruction = `You are an expert DALL-E prompt engineer specializing in fantasy character art. Your task is to create the most effective prompt possible to generate a stunning character portrait. Be specific, vivid, and focus on visual details that will translate well to image generation.`;
 
-        const model = "gemini-2.5-flash-preview-09-2025";
+        const model = "gemini-2.5-flash";
         const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
 
         const payload = {

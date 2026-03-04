@@ -61,7 +61,7 @@ export default async (req, context) => {
             parts: [{ text: msg.text }]
         }));
 
-        const model = "gemini-2.5-flash-preview-09-2025";
+        const model = "gemini-2.5-flash";
         const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
 
         const payload = {
