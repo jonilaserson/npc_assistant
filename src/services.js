@@ -549,13 +549,13 @@ export const generateScene = async (npcData, conversationHistory = null) => {
 };
 
 /**
- * Generates an image for the NPC using OpenAI's DALL-E 3.
- * Uses a two-step process: first asks an LLM to create the perfect DALL-E prompt,
+ * Generates an image for the NPC using OpenAI's gpt-image-2.
+ * Uses a two-step process: first asks an LLM to create the perfect image prompt,
  * then generates the image with that optimized prompt.
  */
 export const generateNPCImage = async (name, raceClass, visualDescription, gender, ageRange, personality, npcId) => {
-    // Step 1: Ask the LLM to act as a DALL-E artist and create the perfect prompt
-    console.log(`\n%c[NPC Generator] Step 1: Asking LLM to create optimized DALL-E prompt...`, 'color: magenta; font-weight: bold;');
+    // Step 1: Ask the LLM to act as an image-prompt artist and create the perfect prompt
+    console.log(`\n%c[NPC Generator] Step 1: Asking LLM to create optimized image prompt...`, 'color: magenta; font-weight: bold;');
 
     const user = auth.currentUser;
     if (!user) throw new Error("User not authenticated");
@@ -579,12 +579,12 @@ export const generateNPCImage = async (name, raceClass, visualDescription, gende
 
     const optimizedPrompt = result.optimizedPrompt;
 
-    console.log(`\n%c[NPC Generator] Optimized DALL-E Prompt:`, 'color: cyan; font-weight: bold;');
+    console.log(`\n%c[NPC Generator] Optimized Image Prompt:`, 'color: cyan; font-weight: bold;');
     console.log(optimizedPrompt);
     console.log('----------------------------------------\n');
 
     // Step 2: Use the optimized prompt with the appropriate model
-    console.log(`%c[NPC Generator] Step 2: Generating high-quality (DALL-E 3, 1024x1024) image...`, 'color: green; font-weight: bold;');
+    console.log(`%c[NPC Generator] Step 2: Generating image (gpt-image-2, 1024x1024)...`, 'color: green; font-weight: bold;');
 
     const apiUrl = '/.netlify/functions/generate-image';
 
@@ -602,14 +602,13 @@ export const generateNPCImage = async (name, raceClass, visualDescription, gende
         });
 
         if (!response.ok) {
-            let errorMessage = "Image generation failed";
+            // Read the body once; it may not be JSON (e.g. a 504 timeout page)
+            const errorText = await response.text();
+            let errorMessage = errorText || response.statusText || "Image generation failed";
             try {
-                const errorData = await response.json();
-                errorMessage = errorData.error || errorMessage;
+                errorMessage = JSON.parse(errorText).error || errorMessage;
             } catch (parseError) {
-                // If response is not JSON (e.g. timeout text), get text
-                const errorText = await response.text();
-                errorMessage = errorText || response.statusText || errorMessage;
+                // Not JSON; keep the raw text
             }
             throw new Error(errorMessage);
         }

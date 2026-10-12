@@ -5,6 +5,7 @@ import { db } from './firebaseConfig';
 
 // Cost estimates (in USD)
 export const COSTS = {
+    'gpt-image-2': 0.006, // low quality, 1024x1024
     'dalle-3': 0.04,
     'dalle-2': 0.016,
     'gemini-chat': 0.00005,
@@ -25,7 +26,8 @@ export const logUsage = async (userId, email, type, metadata = {}) => {
         // Determine cost
         let cost = 0;
         if (type === 'dalle') {
-            cost = metadata.model === 'dall-e-3' ? COSTS['dalle-3'] : COSTS['dalle-2'];
+            cost = metadata.model === 'gpt-image-2' ? COSTS['gpt-image-2']
+                : metadata.model === 'dall-e-3' ? COSTS['dalle-3'] : COSTS['dalle-2'];
         } else if (type === 'gemini_chat') {
             cost = COSTS['gemini-chat'];
         } else if (type === 'gemini_tts') {

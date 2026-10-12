@@ -562,7 +562,7 @@ export const AdminDashboard = ({ user, onExit, onImpersonate }) => {
                     />
                     <StatCard
                         icon={Image}
-                        label="DALL-E Images"
+                        label="Images"
                         value={overallStats.totalDalleImages}
                         color="purple"
                     />

@@ -31,7 +31,7 @@ Describe an NPC in plain English and watch AI create a complete character profil
 AI automatically selects the perfect voice from 100+ premium options (Gemini + ElevenLabs) by analyzing character traits—gender, age, and personality. Don't like it? Regenerate for a different match.
 
 ### 🎨 **Two-Step Image Generation**
-A unique approach: First, an LLM analyzes your character and crafts the perfect DALL-E prompt. Then DALL-E 3 generates a stunning 1024x1024 fantasy portrait. The result? Professional-quality character art that actually matches your vision.
+A unique approach: First, an LLM analyzes your character and crafts the perfect image prompt. Then OpenAI's gpt-image-2 generates a stunning 1024x1024 fantasy portrait. The result? Professional-quality character art that actually matches your vision.
 
 ### 💬 **Context-Aware Roleplay**
 NPCs stay in character across entire conversations, remembering history and reacting based on their personality, goals, and secrets. They won't reveal secrets unless tricked or forced—just like a real character.
@@ -56,7 +56,7 @@ Built on Firebase + Netlify Functions with complete user isolation. API keys nev
 - Node.js 16+ and npm
 - Firebase project (free tier works great)
 - Google AI API key (Gemini)
-- OpenAI API key (for DALL-E image generation)
+- OpenAI API key (for image generation)
 - Cloudinary account (for image storage)
 - ElevenLabs API key (optional, for premium voices)
 
@@ -135,7 +135,7 @@ netlify deploy --prod
 - **Authentication**: Firebase Auth
 - **AI Models**: 
   - Google Gemini 2.0 (character generation, conversations, voice selection)
-  - OpenAI DALL-E 3 (image generation)
+  - OpenAI gpt-image-2 (image generation)
 - **Voice Synthesis**:
   - Google Gemini TTS (100+ voices)
   - ElevenLabs (premium voices)
@@ -158,7 +158,7 @@ npc_assistant/
 ├── netlify/
 │   └── functions/
 │       ├── gemini.js              # Gemini API proxy
-│       ├── generate-image.js      # DALL-E image generation
+│       ├── generate-image.js      # OpenAI image generation
 │       ├── elevenlabs-tts.js      # ElevenLabs TTS proxy
 │       └── delete-image.js        # Cloudinary cleanup
 ├── firestore.rules                # Firestore security rules
@@ -236,7 +236,7 @@ This project is licensed under the MIT License.
 ## 🙏 Acknowledgments
 
 - Built with [Google Gemini](https://deepmind.google/technologies/gemini/) for AI generation
-- Images powered by [OpenAI DALL-E 3](https://openai.com/dall-e-3)
+- Images powered by [OpenAI GPT Image](https://platform.openai.com/docs/guides/image-generation)
 - Voice synthesis by [Google Gemini TTS](https://ai.google.dev/) and [ElevenLabs](https://elevenlabs.io/)
 - Hosted on [Netlify](https://www.netlify.com/)
 - Database by [Firebase](https://firebase.google.com/)

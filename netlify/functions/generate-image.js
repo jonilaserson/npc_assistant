@@ -30,7 +30,7 @@ export default async (req, context) => {
 
         // 3. Generate Image (GPT Image 2; DALL-E 3 was retired by OpenAI)
         console.log('Generating image with gpt-image-2 (1024x1024)...');
-        const payload = { model: "gpt-image-2", prompt: prompt, n: 1, size: "1024x1024", quality: "medium", output_format: "jpeg" };
+        const payload = { model: "gpt-image-2", prompt: prompt, n: 1, size: "1024x1024", quality: "low", output_format: "jpeg" };
 
         const dalleResponse = await fetch('https://api.openai.com/v1/images/generations', {
             method: 'POST',

@@ -1802,7 +1802,7 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
 
             const data = npc.structuredData;
 
-            // Step 1: Generate image with DALL-E 3 and upload to Cloudinary (via backend)
+            // Step 1: Generate image with gpt-image-2 and upload to Cloudinary (via backend)
             const { secure_url, public_id, new_balance, credits_deducted } = await generateNPCImage(data.name, data.raceClass, data.visual, data.gender, data.ageRange, data.personality, npc.id);
 
             const cloudinaryUrl = secure_url;
@@ -1817,7 +1817,7 @@ const NpcChat = ({ db, userId, userEmail, npc, onBack, isMobile = false, mobileV
             // Log analytics
             await logUsage(userId, userEmail, 'dalle', {
                 npcId: npc.id,
-                model: 'dall-e-3'
+                model: 'gpt-image-2'
             });
 
             // Step 3: Update the current display
