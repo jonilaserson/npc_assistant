@@ -11,7 +11,7 @@ export default async (req, context) => {
     }
 
     try {
-        const cost = 5; // Fixed cost for high-quality DALL-E 3
+        const cost = 5; // Fixed cost per generated image
 
         // 1. Verify Authentication & Credits
         const { user: authUser, errorResponse } = await requireAuthAndCredits(req, cost);
@@ -28,9 +28,9 @@ export default async (req, context) => {
             return new Response(JSON.stringify({ error: "Missing Server Configuration" }), { status: 500, headers: CORS_HEADERS });
         }
 
-        // 3. Generate Image (DALL-E 3 Only)
-        console.log('Generating high-quality image with DALL-E 3 (1024x1024)...');
-        const payload = { model: "dall-e-3", prompt: prompt, n: 1, size: "1024x1024", quality: "standard", style: "vivid" };
+        // 3. Generate Image (GPT Image 2; DALL-E 3 was retired by OpenAI)
+        console.log('Generating image with gpt-image-2 (1024x1024)...');
+        const payload = { model: "gpt-image-2", prompt: prompt, n: 1, size: "1024x1024", quality: "medium", output_format: "jpeg" };
 
         const dalleResponse = await fetch('https://api.openai.com/v1/images/generations', {
             method: 'POST',
@@ -42,10 +42,11 @@ export default async (req, context) => {
         });
 
         const dalleResult = await dalleResponse.json();
-        if (!dalleResult.data || !dalleResult.data[0].url) {
-            throw new Error("DALL-E generation failed: " + JSON.stringify(dalleResult));
+        if (!dalleResult.data || !dalleResult.data[0].b64_json) {
+            throw new Error("Image generation failed: " + JSON.stringify(dalleResult));
         }
-        const imageUrl = dalleResult.data[0].url;
+        // GPT image models return base64 only; Cloudinary accepts it as a data URI
+        const imageUrl = `data:image/jpeg;base64,${dalleResult.data[0].b64_json}`;
 
         // 4. Upload to Cloudinary
         console.log("Uploading to Cloudinary...");
